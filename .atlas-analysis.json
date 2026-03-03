@@ -1,0 +1,86 @@
+{
+  "projectType": "data-platform",
+  "projectName": "BOOM",
+  "projectDescription": "A next generation astronomical alert broker written in Rust for processing and filtering real-time survey alerts at scale.",
+  "theme": "aspen",
+  "primaryColor": "#FF6B35",
+  "lightColor": "#FFB088",
+  "darkColor": "#CC4420",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Getting Started",
+            "pages": [
+              "introduction",
+              "installation",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/architecture",
+              "concepts/alert-pipeline",
+              "concepts/workers",
+              "concepts/configuration"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/running-boom",
+              "guides/processing-alerts",
+              "guides/creating-filters",
+              "guides/monitoring",
+              "guides/logging"
+            ]
+          },
+          {
+            "group": "API Reference",
+            "pages": [
+              "api/overview",
+              "api/authentication",
+              "api/filters",
+              "api/queries",
+              "api/users"
+            ]
+          },
+          {
+            "group": "Development",
+            "pages": [
+              "development/contributing",
+              "development/testing",
+              "development/code-of-conduct"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Multi-stage alert processing pipeline with Kafka consumers, alert ingestion workers, enrichment workers, and filter workers",
+    "Real-time astronomical alert brokering from multiple surveys (ZTF, LSST, DECam)",
+    "Crossmatching with archival catalogs (PS1, Gaia, NED, MilliQuas)",
+    "User-defined filters with MongoDB aggregation pipelines",
+    "RESTful API for alert queries and filter management",
+    "Scalable worker architecture with Redis/Valkey task queues",
+    "Prometheus metrics and monitoring integration"
+  ],
+  "publicApiSurface": [
+    "kafka_consumer - Read alerts from Kafka topics and queue for processing",
+    "kafka_producer - Produce test alerts from archived data",
+    "scheduler - Manage alert, enrichment, and filter workers",
+    "api - HTTP REST API server",
+    "add_filter - CLI tool to add filters to the system",
+    "API: POST /api/v1/auth/login - Authenticate and get JWT token",
+    "API: GET /api/v1/filters - List all filters",
+    "API: POST /api/v1/filters - Create new filter",
+    "API: PATCH /api/v1/filters/{id} - Update filter",
+    "API: POST /api/v1/filters/{id}/versions - Create new filter version",
+    "API: GET /api/v1/queries/alerts - Query alerts with filters",
+    "API: GET /api/v1/catalogs - List available catalogs"
+  ]
+}

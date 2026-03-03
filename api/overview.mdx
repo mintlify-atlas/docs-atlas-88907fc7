@@ -50,6 +50,14 @@ Execute analytical queries against alert catalogs.
 - `POST /queries/cone_search` - Perform cone search queries
 - `POST /queries/pipeline` - Execute custom aggregation pipelines
 
+### Catalogs
+
+Explore and query astronomical data catalogs.
+
+- `GET /catalogs` - List available catalogs
+- `GET /catalogs/{catalog_name}/indexes` - Get catalog indexes
+- `GET /catalogs/{catalog_name}/sample` - Get sample documents
+
 ### Users
 
 Manage user accounts (admin only).
@@ -57,6 +65,17 @@ Manage user accounts (admin only).
 - `GET /users` - List all users
 - `POST /users` - Create a new user
 - `DELETE /users/{user_id}` - Delete a user
+
+### Babamul API
+
+User-facing API for alert access (when enabled).
+
+- Account management (signup, activate, auth, profile)
+- Password reset functionality
+- Kafka credentials for streaming
+- API tokens for programmatic access
+- Survey data access (alerts, objects, cutouts, cross-matches)
+- Schema access
 
 ## Response format
 
@@ -119,7 +138,13 @@ Query timeouts can be configured using the `max_time_ms` parameter available in 
   <Card title="Queries" icon="magnifying-glass" href="/api/queries">
     Query alert catalogs and run analyses
   </Card>
+  <Card title="Catalogs" icon="database" href="/api/catalogs">
+    Explore available data catalogs
+  </Card>
   <Card title="Users" icon="users" href="/api/users">
     Manage user accounts
+  </Card>
+  <Card title="Babamul" icon="user-astronaut" href="/api/babamul">
+    User-facing alert access API
   </Card>
 </CardGroup>

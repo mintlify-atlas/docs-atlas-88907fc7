@@ -57,7 +57,9 @@
               "api/authentication",
               "api/filters",
               "api/queries",
-              "api/users"
+              "api/catalogs",
+              "api/users",
+              "api/babamul"
             ]
           },
           {

@@ -1,0 +1,860 @@
+---
+title: Babamul
+description: User-facing API for alert access and account management
+---
+
+Babamul is a user-facing API that provides public access to astronomical alert data. When enabled via `config.babamul.enabled`, it allows users to sign up, authenticate, and query alert streams from surveys like ZTF and LSST.
+
+<Note>
+  Babamul must be enabled in your configuration file to use these endpoints. Set `babamul.enabled: true` in `config.yaml`.
+</Note>
+
+## Account Management
+
+### Sign up for account
+
+Create a new Babamul account using an email address. An activation code will be sent to your email.
+
+<CodeGroup>
+```bash curl
+curl -X POST http://localhost:4000/babamul/signup \
+  -H "Content-Type: application/json" \
+  -d '{"email": "user@example.com"}'
+```
+
+```python Python
+import requests
+
+response = requests.post(
+    "http://localhost:4000/babamul/signup",
+    json={"email": "user@example.com"}
+)
+
+result = response.json()
+print(result["message"])
+```
+</CodeGroup>
+
+#### Request
+
+<ParamField body="email" type="string" required>
+  Valid email address for the account. Must be unique.
+</ParamField>
+
+#### Response
+
+<ResponseField name="message" type="string">
+  Success message with next steps
+</ResponseField>
+
+<ResponseField name="activation_required" type="boolean">
+  Whether activation is required (always `true`)
+</ResponseField>
+
+<Expandable title="Example response">
+```json
+{
+  "message": "Signup successful. An activation code has been sent to user@example.com. Use the /babamul/activate endpoint to activate your account and receive your password.",
+  "activation_required": true
+}
+```
+</Expandable>
+
+### Activate account
+
+Activate your Babamul account using the activation code sent to your email. Upon successful activation, you'll receive your password.
+
+<CodeGroup>
+```bash curl
+curl -X POST http://localhost:4000/babamul/activate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "user@example.com",
+    "activation_code": "your-activation-code"
+  }'
+```
+
+```python Python
+import requests
+
+response = requests.post(
+    "http://localhost:4000/babamul/activate",
+    json={
+        "email": "user@example.com",
+        "activation_code": "your-activation-code"
+    }
+)
+
+result = response.json()
+password = result["password"]  # Save this securely!
+print(f"Your password: {password}")
+```
+</CodeGroup>
+
+#### Request
+
+<ParamField body="email" type="string" required>
+  Email address used during signup
+</ParamField>
+
+<ParamField body="activation_code" type="string" required>
+  Activation code received via email
+</ParamField>
+
+#### Response
+
+<ResponseField name="message" type="string">
+  Success message
+</ResponseField>
+
+<ResponseField name="activated" type="boolean">
+  Whether the account is activated
+</ResponseField>
+
+<ResponseField name="username" type="string">
+  Generated username (derived from email)
+</ResponseField>
+
+<ResponseField name="email" type="string">
+  Account email address
+</ResponseField>
+
+<ResponseField name="password" type="string">
+  Generated password (only returned once on initial activation)
+</ResponseField>
+
+<Warning>
+  The password is only returned once during activation. Save it securely - you cannot retrieve it again.
+</Warning>
+
+### Authenticate
+
+Authenticate with email and password to receive a JWT access token.
+
+<CodeGroup>
+```bash curl
+curl -X POST http://localhost:4000/babamul/auth \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "email=user@example.com&password=your_password"
+```
+
+```python Python
+import requests
+
+response = requests.post(
+    "http://localhost:4000/babamul/auth",
+    data={
+        "email": "user@example.com",
+        "password": "your_password"
+    }
+)
+
+token_data = response.json()
+access_token = token_data["access_token"]
+```
+</CodeGroup>
+
+#### Request
+
+<ParamField body="email" type="string" required>
+  Account email address (can also use `username` field)
+</ParamField>
+
+<ParamField body="password" type="string" required>
+  Account password
+</ParamField>
+
+#### Response
+
+<ResponseField name="access_token" type="string">
+  JWT access token for authenticating subsequent requests
+</ResponseField>
+
+<ResponseField name="token_type" type="string">
+  Token type (always `Bearer`)
+</ResponseField>
+
+<ResponseField name="expires_in" type="number">
+  Token expiration time in seconds
+</ResponseField>
+
+### Get user profile
+
+Retrieve the authenticated user's profile information.
+
+<CodeGroup>
+```bash curl
+curl http://localhost:4000/babamul/profile \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+```python Python
+import requests
+
+response = requests.get(
+    "http://localhost:4000/babamul/profile",
+    headers={"Authorization": f"Bearer {access_token}"}
+)
+
+profile = response.json()["data"]
+```
+</CodeGroup>
+
+#### Response
+
+<ResponseField name="id" type="string">
+  User ID (UUID)
+</ResponseField>
+
+<ResponseField name="username" type="string">
+  Username
+</ResponseField>
+
+<ResponseField name="email" type="string">
+  Email address
+</ResponseField>
+
+<ResponseField name="created_at" type="number">
+  Account creation timestamp (Unix timestamp)
+</ResponseField>
+
+## Password Reset
+
+### Request password reset
+
+Request a password reset link. A reset token will be sent to the email if an activated account exists.
+
+<CodeGroup>
+```bash curl
+curl -X POST http://localhost:4000/babamul/forgot-password \
+  -H "Content-Type: application/json" \
+  -d '{"email": "user@example.com"}'
+```
+
+```python Python
+import requests
+
+response = requests.post(
+    "http://localhost:4000/babamul/forgot-password",
+    json={"email": "user@example.com"}
+)
+```
+</CodeGroup>
+
+#### Request
+
+<ParamField body="email" type="string" required>
+  Email address of the account
+</ParamField>
+
+<Note>
+  The response is always the same to prevent account enumeration. If the email exists and the account is activated, a reset link will be sent.
+</Note>
+
+### Reset password
+
+Reset your password using the reset token received via email.
+
+<CodeGroup>
+```bash curl
+curl -X POST http://localhost:4000/babamul/reset-password \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "user@example.com",
+    "token": "your-reset-token",
+    "new_password": "NewSecurePassword123!"
+  }'
+```
+
+```python Python
+import requests
+
+response = requests.post(
+    "http://localhost:4000/babamul/reset-password",
+    json={
+        "email": "user@example.com",
+        "token": "your-reset-token",
+        "new_password": "NewSecurePassword123!"
+    }
+)
+```
+</CodeGroup>
+
+#### Request
+
+<ParamField body="email" type="string" required>
+  Account email address
+</ParamField>
+
+<ParamField body="token" type="string" required>
+  Password reset token received via email
+</ParamField>
+
+<ParamField body="new_password" type="string" required>
+  New password meeting complexity requirements:
+  - At least 12 characters
+  - At least one uppercase letter
+  - At least one lowercase letter
+  - At least one digit
+  - At least one special character
+</ParamField>
+
+<Note>
+  Password resets are rate-limited to once every 15 minutes (configurable via `babamul.password_reset_cooldown_minutes`).
+</Note>
+
+## Kafka Credentials
+
+Kafka credentials allow you to consume alert streams directly from Kafka topics.
+
+### Create Kafka credential
+
+Create a new Kafka credential for consuming alert streams.
+
+<CodeGroup>
+```bash curl
+curl -X POST http://localhost:4000/babamul/kafka-credentials \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "My Kafka Client"}'
+```
+
+```python Python
+import requests
+
+response = requests.post(
+    "http://localhost:4000/babamul/kafka-credentials",
+    headers={"Authorization": f"Bearer {access_token}"},
+    json={"name": "My Kafka Client"}
+)
+
+credential = response.json()["data"]
+kafka_username = credential["kafka_username"]
+kafka_password = credential["kafka_password"]  # Save this securely!
+```
+</CodeGroup>
+
+#### Request
+
+<ParamField body="name" type="string" required>
+  User-defined name for the credential
+</ParamField>
+
+#### Response
+
+<ResponseField name="id" type="string">
+  Credential ID (UUID)
+</ResponseField>
+
+<ResponseField name="name" type="string">
+  User-defined name
+</ResponseField>
+
+<ResponseField name="kafka_username" type="string">
+  Kafka username (format: `babamul-{credential_id}`)
+</ResponseField>
+
+<ResponseField name="kafka_password" type="string">
+  Kafka password (only returned on creation - save it securely!)
+</ResponseField>
+
+<ResponseField name="created_at" type="number">
+  Creation timestamp (Unix timestamp)
+</ResponseField>
+
+<Warning>
+  The Kafka password is only returned when the credential is created. It can be retrieved later, but store it securely.
+</Warning>
+
+### List Kafka credentials
+
+Retrieve all Kafka credentials for the authenticated user.
+
+<CodeGroup>
+```bash curl
+curl http://localhost:4000/babamul/kafka-credentials \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+```python Python
+import requests
+
+response = requests.get(
+    "http://localhost:4000/babamul/kafka-credentials",
+    headers={"Authorization": f"Bearer {access_token}"}
+)
+
+credentials = response.json()["data"]
+```
+</CodeGroup>
+
+#### Response
+
+Returns an array of Kafka credential objects including decrypted passwords.
+
+### Delete Kafka credential
+
+Delete a Kafka credential and revoke its access to Kafka topics.
+
+<CodeGroup>
+```bash curl
+curl -X DELETE http://localhost:4000/babamul/kafka-credentials/CREDENTIAL_ID \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+```python Python
+import requests
+
+response = requests.delete(
+    f"http://localhost:4000/babamul/kafka-credentials/{credential_id}",
+    headers={"Authorization": f"Bearer {access_token}"}
+)
+```
+</CodeGroup>
+
+#### Path parameters
+
+<ParamField path="credential_id" type="string" required>
+  ID of the Kafka credential to delete
+</ParamField>
+
+## API Tokens
+
+API tokens provide long-lived authentication for programmatic access.
+
+### Create API token
+
+Create a new API token for the authenticated user.
+
+<CodeGroup>
+```bash curl
+curl -X POST http://localhost:4000/babamul/tokens \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Research Script",
+    "expires_in_days": 365
+  }'
+```
+
+```python Python
+import requests
+
+response = requests.post(
+    "http://localhost:4000/babamul/tokens",
+    headers={"Authorization": f"Bearer {jwt_token}"},
+    json={
+        "name": "Research Script",
+        "expires_in_days": 365
+    }
+)
+
+token = response.json()
+api_token = token["access_token"]  # Format: bbml_....
+```
+</CodeGroup>
+
+#### Request
+
+<ParamField body="name" type="string" required>
+  User-defined name for the token
+</ParamField>
+
+<ParamField body="expires_in_days" type="number" default="365">
+  Token expiration in days (1-1095, i.e., up to 3 years)
+</ParamField>
+
+#### Response
+
+<ResponseField name="id" type="string">
+  Token ID (UUID)
+</ResponseField>
+
+<ResponseField name="name" type="string">
+  Token name
+</ResponseField>
+
+<ResponseField name="access_token" type="string">
+  API token (format: `bbml_...`) - save this securely!
+</ResponseField>
+
+<ResponseField name="created_at" type="number">
+  Creation timestamp
+</ResponseField>
+
+<ResponseField name="expires_at" type="number">
+  Expiration timestamp
+</ResponseField>
+
+<Note>
+  You can create up to 10 API tokens per user. Delete unused tokens to free up space.
+</Note>
+
+### List API tokens
+
+Retrieve all API tokens for the authenticated user.
+
+<CodeGroup>
+```bash curl
+curl http://localhost:4000/babamul/tokens \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+```python Python
+import requests
+
+response = requests.get(
+    "http://localhost:4000/babamul/tokens",
+    headers={"Authorization": f"Bearer {access_token}"}
+)
+
+tokens = response.json()
+```
+</CodeGroup>
+
+#### Response
+
+Returns an array of token objects (without the actual token values).
+
+<ResponseField name="id" type="string">
+  Token ID
+</ResponseField>
+
+<ResponseField name="name" type="string">
+  Token name
+</ResponseField>
+
+<ResponseField name="created_at" type="number">
+  Creation timestamp
+</ResponseField>
+
+<ResponseField name="expires_at" type="number">
+  Expiration timestamp
+</ResponseField>
+
+<ResponseField name="last_used_at" type="number">
+  Last usage timestamp (if token has been used)
+</ResponseField>
+
+### Delete API token
+
+Revoke an API token by deleting it.
+
+<CodeGroup>
+```bash curl
+curl -X DELETE http://localhost:4000/babamul/tokens/TOKEN_ID \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+```python Python
+import requests
+
+response = requests.delete(
+    f"http://localhost:4000/babamul/tokens/{token_id}",
+    headers={"Authorization": f"Bearer {access_token}"}
+)
+```
+</CodeGroup>
+
+#### Path parameters
+
+<ParamField path="token_id" type="string" required>
+  ID of the token to delete
+</ParamField>
+
+## Survey Data Access
+
+### Query alerts
+
+Query alerts from a survey's alert stream with flexible filtering options.
+
+<CodeGroup>
+```bash curl
+curl "http://localhost:4000/babamul/surveys/ztf/alerts?object_id=ZTF18aabcdef" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+```python Python
+import requests
+
+response = requests.get(
+    "http://localhost:4000/babamul/surveys/ztf/alerts",
+    params={
+        "object_id": "ZTF18aabcdef",
+        "limit": 100
+    },
+    headers={"Authorization": f"Bearer {access_token}"}
+)
+
+alerts = response.json()["data"]
+```
+</CodeGroup>
+
+#### Path parameters
+
+<ParamField path="survey" type="string" required>
+  Survey name: `ztf` or `lsst`
+</ParamField>
+
+#### Query parameters
+
+You must provide at least one of: `object_id`, or (`ra`, `dec`, `radius_arcsec`), or a time range less than 1 Julian Date.
+
+<ParamField query="object_id" type="string">
+  Object ID to filter alerts
+</ParamField>
+
+<ParamField query="ra" type="number">
+  Right Ascension in degrees for cone search
+</ParamField>
+
+<ParamField query="dec" type="number">
+  Declination in degrees for cone search
+</ParamField>
+
+<ParamField query="radius_arcsec" type="number">
+  Search radius in arcseconds (max 600)
+</ParamField>
+
+<ParamField query="start_jd" type="number">
+  Start Julian Date for time range filter
+</ParamField>
+
+<ParamField query="end_jd" type="number">
+  End Julian Date for time range filter
+</ParamField>
+
+<ParamField query="min_magpsf" type="number">
+  Minimum PSF magnitude
+</ParamField>
+
+<ParamField query="max_magpsf" type="number">
+  Maximum PSF magnitude
+</ParamField>
+
+<ParamField query="min_drb" type="number">
+  Minimum DRB/reliability score
+</ParamField>
+
+<ParamField query="is_rock" type="boolean">
+  Filter for likely rock candidates
+</ParamField>
+
+<ParamField query="is_star" type="boolean">
+  Filter for likely star candidates
+</ParamField>
+
+<ParamField query="limit" type="number" default="100000">
+  Maximum number of alerts to return (1-100000)
+</ParamField>
+
+<ParamField query="skip" type="number" default="0">
+  Number of alerts to skip for pagination
+</ParamField>
+
+<Note>
+  For ZTF, only public alerts (programid=1) are returned through Babamul.
+</Note>
+
+### Get object by ID
+
+Retrieve detailed information about a specific object including its photometric history and cross-matches.
+
+<CodeGroup>
+```bash curl
+curl http://localhost:4000/babamul/surveys/ztf/objects/ZTF18aabcdef \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+```python Python
+import requests
+
+response = requests.get(
+    "http://localhost:4000/babamul/surveys/ztf/objects/ZTF18aabcdef",
+    headers={"Authorization": f"Bearer {access_token}"}
+)
+
+object_data = response.json()["data"]
+```
+</CodeGroup>
+
+#### Path parameters
+
+<ParamField path="survey" type="string" required>
+  Survey name: `ztf` or `lsst`
+</ParamField>
+
+<ParamField path="object_id" type="string" required>
+  Object identifier
+</ParamField>
+
+#### Response
+
+Returns detailed object information including:
+- Most recent candidate/alert data
+- Full photometric history (previous candidates and forced photometry)
+- Cross-matches with other catalogs
+- Survey-to-survey matches (e.g., ZTF object matched to LSST)
+- Properties and classifications
+
+### Search objects
+
+Search for objects by partial object ID.
+
+<CodeGroup>
+```bash curl
+curl "http://localhost:4000/babamul/objects?object_id=ZTF18aa&limit=10" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+```python Python
+import requests
+
+response = requests.get(
+    "http://localhost:4000/babamul/objects",
+    params={
+        "object_id": "ZTF18aa",
+        "limit": 10
+    },
+    headers={"Authorization": f"Bearer {access_token}"}
+)
+
+objects = response.json()["data"]
+```
+</CodeGroup>
+
+#### Query parameters
+
+<ParamField query="object_id" type="string" required>
+  Partial object ID to search (supports ZTF and LSST naming)
+</ParamField>
+
+<ParamField query="limit" type="number" default="10">
+  Maximum results (1-100)
+</ParamField>
+
+### Get cutouts
+
+Retrieve image cutouts (science, template, difference) for an alert.
+
+<CodeGroup>
+```bash curl
+curl "http://localhost:4000/babamul/surveys/ztf/cutouts?candid=1234567890" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+```python Python
+import requests
+import base64
+from astropy.io import fits
+import io
+
+response = requests.get(
+    "http://localhost:4000/babamul/surveys/ztf/cutouts",
+    params={"candid": 1234567890},
+    headers={"Authorization": f"Bearer {access_token}"}
+)
+
+data = response.json()["data"]
+
+# Decode base64-encoded FITS cutouts
+science_fits = fits.open(io.BytesIO(base64.b64decode(data["cutoutScience"])))
+template_fits = fits.open(io.BytesIO(base64.b64decode(data["cutoutTemplate"])))
+difference_fits = fits.open(io.BytesIO(base64.b64decode(data["cutoutDifference"])))
+```
+</CodeGroup>
+
+#### Path parameters
+
+<ParamField path="survey" type="string" required>
+  Survey name: `ztf` or `lsst`
+</ParamField>
+
+#### Query parameters
+
+Must provide either `candid` OR `objectId`:
+
+<ParamField query="candid" type="number">
+  Alert candidate ID
+</ParamField>
+
+<ParamField query="objectId" type="string">
+  Object ID (uses `which` parameter to select alert)
+</ParamField>
+
+<ParamField query="which" type="string" default="brightest">
+  Which alert to use when querying by objectId: `first`, `last`, `brightest`, or `faintest`
+</ParamField>
+
+<ParamField query="band" type="string">
+  Filter band to retrieve (e.g., `g`, `r`, `i`)
+</ParamField>
+
+#### Response
+
+<ResponseField name="candid" type="number">
+  Alert candidate ID
+</ResponseField>
+
+<ResponseField name="cutoutScience" type="string">
+  Base64-encoded FITS cutout of science image
+</ResponseField>
+
+<ResponseField name="cutoutTemplate" type="string">
+  Base64-encoded FITS cutout of template image
+</ResponseField>
+
+<ResponseField name="cutoutDifference" type="string">
+  Base64-encoded FITS cutout of difference image
+</ResponseField>
+
+### Get Avro schema
+
+Retrieve the Avro schema used for encoding alerts in Kafka streams.
+
+<CodeGroup>
+```bash curl
+curl http://localhost:4000/babamul/surveys/ztf/schemas
+```
+
+```python Python
+import requests
+
+response = requests.get(
+    "http://localhost:4000/babamul/surveys/ztf/schemas"
+)
+
+schema = response.json()
+```
+</CodeGroup>
+
+#### Path parameters
+
+<ParamField path="survey" type="string" required>
+  Survey name: `ztf` or `lsst`
+</ParamField>
+
+<Note>
+  This endpoint does not require authentication as schemas are public.
+</Note>
+
+## Configuration
+
+Babamul is configured in `config.yaml`:
+
+```yaml
+babamul:
+  enabled: true
+  webapp_url: "https://your-webapp.com"  # Optional: URL for activation/reset links
+  password_reset_cooldown_minutes: 15    # Rate limit for password resets
+```
+
+## Best practices
+
+1. **Secure credentials** - Store passwords and API tokens securely using environment variables or secret managers
+2. **Use API tokens** - For programmatic access, use long-lived API tokens instead of passwords
+3. **Limit Kafka credentials** - Only create Kafka credentials when needed for streaming access
+4. **Monitor usage** - Track `last_used_at` timestamps on tokens to identify unused credentials
+5. **Filter efficiently** - Use indexed fields (objectId, coordinates) for faster queries
+6. **Batch requests** - Use cone-search endpoints for querying multiple positions efficiently
+7. **Respect rate limits** - Be mindful of query limits and pagination for large result sets

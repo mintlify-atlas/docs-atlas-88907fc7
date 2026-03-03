@@ -1,0 +1,366 @@
+---
+title: Catalogs
+description: Access available data catalogs and retrieve catalog metadata
+---
+
+The Catalogs API provides endpoints to explore available data catalogs in BOOM, inspect their indexes, and retrieve sample documents. Catalogs represent MongoDB collections containing astronomical data.
+
+## List available catalogs
+
+Retrieve a list of all available data catalogs in the system.
+
+<CodeGroup>
+```bash curl
+curl http://localhost:4000/catalogs \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+```python Python
+import requests
+
+response = requests.get(
+    "http://localhost:4000/catalogs",
+    headers={"Authorization": f"Bearer {token}"}
+)
+
+catalogs = response.json()["data"]
+```
+
+```javascript JavaScript
+const response = await fetch('http://localhost:4000/catalogs', {
+  headers: {
+    'Authorization': `Bearer ${token}`
+  }
+});
+
+const data = await response.json();
+const catalogs = data.data;
+```
+</CodeGroup>
+
+### Query parameters
+
+<ParamField query="get_details" type="boolean" default="false">
+  Whether to include detailed collection statistics for each catalog
+</ParamField>
+
+### Response
+
+Returns an array of catalog objects. If `get_details=true`, each catalog includes MongoDB collection statistics.
+
+<ResponseField name="name" type="string">
+  Name of the catalog (MongoDB collection name)
+</ResponseField>
+
+<ResponseField name="details" type="object">
+  Collection statistics (only when `get_details=true`). Includes document count, size, indexes, and other MongoDB collection metadata.
+</ResponseField>
+
+<Expandable title="Example response (basic)">
+```json
+{
+  "status": "success",
+  "data": [
+    {
+      "name": "ztf"
+    },
+    {
+      "name": "gaia"
+    },
+    {
+      "name": "panstarrs"
+    }
+  ]
+}
+```
+</Expandable>
+
+<Expandable title="Example response (with details)">
+```json
+{
+  "status": "success",
+  "data": [
+    {
+      "name": "ztf",
+      "details": {
+        "ns": "boom.ztf",
+        "size": 12345678,
+        "count": 50000,
+        "avgObjSize": 246,
+        "storageSize": 8388608,
+        "nindexes": 3,
+        "totalIndexSize": 2097152
+      }
+    }
+  ]
+}
+```
+</Expandable>
+
+<Note>
+  Catalogs cannot have names that start with `system.` or match protected collection names used internally by BOOM (e.g., `users`, `filters`, `babamul_users`).
+</Note>
+
+## Get catalog indexes
+
+Retrieve index information for a specific catalog. Indexes improve query performance for frequently accessed fields.
+
+<CodeGroup>
+```bash curl
+curl http://localhost:4000/catalogs/ztf/indexes \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+```python Python
+import requests
+
+catalog_name = "ztf"
+response = requests.get(
+    f"http://localhost:4000/catalogs/{catalog_name}/indexes",
+    headers={"Authorization": f"Bearer {token}"}
+)
+
+indexes = response.json()["data"]
+```
+
+```javascript JavaScript
+const catalogName = 'ztf';
+const response = await fetch(`http://localhost:4000/catalogs/${catalogName}/indexes`, {
+  headers: {
+    'Authorization': `Bearer ${token}`
+  }
+});
+
+const data = await response.json();
+const indexes = data.data;
+```
+</CodeGroup>
+
+### Path parameters
+
+<ParamField path="catalog_name" type="string" required>
+  Name of the catalog (case insensitive), e.g., `ztf`, `gaia`, `panstarrs`
+</ParamField>
+
+### Response
+
+Returns an array of index objects with MongoDB index information.
+
+<ResponseField name="name" type="string">
+  Name of the index
+</ResponseField>
+
+<ResponseField name="key" type="object">
+  Index key specification (fields and sort order)
+</ResponseField>
+
+<ResponseField name="v" type="number">
+  Index version
+</ResponseField>
+
+<ResponseField name="unique" type="boolean">
+  Whether the index enforces uniqueness
+</ResponseField>
+
+<ResponseField name="sparse" type="boolean">
+  Whether the index is sparse (only indexes documents with the indexed field)
+</ResponseField>
+
+<Expandable title="Example response">
+```json
+{
+  "status": "success",
+  "data": [
+    {
+      "v": 2,
+      "key": {
+        "_id": 1
+      },
+      "name": "_id_"
+    },
+    {
+      "v": 2,
+      "key": {
+        "coordinates.radec_geojson": "2dsphere"
+      },
+      "name": "coordinates.radec_geojson_2dsphere",
+      "2dsphereIndexVersion": 3
+    },
+    {
+      "v": 2,
+      "key": {
+        "objectId": 1
+      },
+      "name": "objectId_1"
+    }
+  ]
+}
+```
+</Expandable>
+
+### Error responses
+
+**404 Not Found** - Catalog doesn't exist:
+```json
+Catalog ztf does not exist
+```
+
+## Get sample documents
+
+Retrieve random sample documents from a catalog to explore its schema and data structure.
+
+<CodeGroup>
+```bash curl
+curl "http://localhost:4000/catalogs/ztf/sample?size=5" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+```python Python
+import requests
+
+catalog_name = "ztf"
+response = requests.get(
+    f"http://localhost:4000/catalogs/{catalog_name}/sample",
+    params={"size": 5},
+    headers={"Authorization": f"Bearer {token}"}
+)
+
+sample_docs = response.json()["data"]
+```
+
+```javascript JavaScript
+const catalogName = 'ztf';
+const response = await fetch(
+  `http://localhost:4000/catalogs/${catalogName}/sample?size=5`,
+  {
+    headers: {
+      'Authorization': `Bearer ${token}`
+    }
+  }
+);
+
+const data = await response.json();
+const sampleDocs = data.data;
+```
+</CodeGroup>
+
+### Path parameters
+
+<ParamField path="catalog_name" type="string" required>
+  Name of the catalog (case insensitive), e.g., `ztf`, `gaia`, `panstarrs`
+</ParamField>
+
+### Query parameters
+
+<ParamField query="size" type="number" default="1">
+  Number of random sample documents to return. Must be between 1 and 1000.
+</ParamField>
+
+### Response
+
+Returns an array of random documents from the catalog. The exact structure depends on the catalog schema.
+
+<Expandable title="Example response">
+```json
+{
+  "status": "success",
+  "data": [
+    {
+      "_id": "ZTF18aabcdef",
+      "ra": 123.456,
+      "dec": -12.345,
+      "objectId": "ZTF18aabcdef",
+      "candidate": {
+        "jd": 2458849.1234567,
+        "magpsf": 18.5,
+        "sigmapsf": 0.1,
+        "fid": 1
+      },
+      "coordinates": {
+        "radec_geojson": {
+          "type": "Point",
+          "coordinates": [-56.544, -12.345]
+        }
+      }
+    }
+  ]
+}
+```
+</Expandable>
+
+### Error responses
+
+**404 Not Found** - Catalog doesn't exist:
+```json
+Catalog ztf does not exist
+```
+
+**400 Bad Request** - Invalid size parameter:
+```json
+Size must be between 1 and 1000
+```
+
+## Use cases
+
+### Explore available data
+
+Before querying a catalog, list all available catalogs to see what data sources are loaded:
+
+```python
+import requests
+
+response = requests.get(
+    "http://localhost:4000/catalogs",
+    params={"get_details": True},
+    headers={"Authorization": f"Bearer {token}"}
+)
+
+for catalog in response.json()["data"]:
+    print(f"Catalog: {catalog['name']}")
+    print(f"  Documents: {catalog['details']['count']}")
+    print(f"  Size: {catalog['details']['size'] / 1024 / 1024:.2f} MB")
+```
+
+### Understand catalog schema
+
+Retrieve sample documents to understand the structure and fields available for querying:
+
+```python
+import requests
+import json
+
+# Get a few sample documents
+response = requests.get(
+    "http://localhost:4000/catalogs/ztf/sample",
+    params={"size": 3},
+    headers={"Authorization": f"Bearer {token}"}
+)
+
+samples = response.json()["data"]
+print(json.dumps(samples[0], indent=2))  # Pretty print first sample
+```
+
+### Check query optimization
+
+Inspect indexes to understand which fields are optimized for querying:
+
+```python
+import requests
+
+response = requests.get(
+    "http://localhost:4000/catalogs/ztf/indexes",
+    headers={"Authorization": f"Bearer {token}"}
+)
+
+for index in response.json()["data"]:
+    print(f"Index: {index['name']}")
+    print(f"  Fields: {list(index['key'].keys())}")
+```
+
+## Best practices
+
+1. **Use details sparingly** - Only request detailed catalog information when needed, as it requires additional database queries
+2. **Check indexes** - Before building complex queries, check which fields are indexed for optimal performance
+3. **Sample before querying** - Review sample documents to understand the catalog schema before writing queries
+4. **Case insensitive** - Catalog names are case insensitive, but use consistent casing for clarity
+5. **Reasonable sample sizes** - Keep sample sizes small (10-100 documents) to avoid unnecessary data transfer

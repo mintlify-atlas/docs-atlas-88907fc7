@@ -1,0 +1,104 @@
+---
+title: Testing
+description: Learn how to run tests in BOOM and understand the testing requirements
+---
+
+## Running tests
+
+We are currently working on adding tests to the codebase. You can run the tests with:
+
+```bash
+cargo test
+```
+
+## Test requirements
+
+Tests currently require the Kafka, Valkey, and Mongo Docker containers to be running. You can start these services using Docker Compose:
+
+```bash
+docker compose --profile api up -d
+```
+
+<Note>
+When running the tests, the config file found in `tests/config.test.yaml` will be used.
+</Note>
+
+## Test configuration
+
+The test suite uses a dedicated configuration file separate from the main application config. This ensures that tests run in isolation and don't interfere with your development environment.
+
+### Test configuration file
+
+The test configuration is located at:
+
+```
+tests/config.test.yaml
+```
+
+This file contains test-specific settings for connecting to the Docker services and other test parameters.
+
+## Continuous integration
+
+The test suite runs automatically on every push to the repository and on every pull request. You can check the status of the tests in the "Actions" tab of the GitHub repository.
+
+<Warning>
+Make sure all tests pass before submitting a pull request.
+</Warning>
+
+## Running tests during development
+
+<Steps>
+  <Step title="Start Docker services">
+    Ensure the required Docker containers are running:
+    
+    ```bash
+    docker compose --profile api up -d
+    ```
+  </Step>
+
+  <Step title="Verify containers are healthy">
+    Check that all containers are running properly:
+    
+    ```bash
+    docker ps
+    ```
+  </Step>
+
+  <Step title="Run the test suite">
+    Execute all tests:
+    
+    ```bash
+    cargo test
+    ```
+  </Step>
+</Steps>
+
+## Running specific tests
+
+You can run specific tests by providing a filter pattern:
+
+```bash
+cargo test <test_name_pattern>
+```
+
+For example, to run all tests containing "alert" in their name:
+
+```bash
+cargo test alert
+```
+
+## Test output
+
+By default, Cargo captures test output. To see all output including println! statements:
+
+```bash
+cargo test -- --nocapture
+```
+
+## Building for tests
+
+If you want to build the test binaries without running them:
+
+```bash
+cargo test --no-run
+```

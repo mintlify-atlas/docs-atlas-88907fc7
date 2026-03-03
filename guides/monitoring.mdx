@@ -1,0 +1,386 @@
+---
+title: Monitoring
+description: Monitor BOOM pipeline performance with Prometheus metrics
+---
+
+BOOM exports OpenTelemetry metrics to Prometheus for monitoring pipeline performance and health. This guide covers available metrics and how to use them.
+
+## Accessing metrics
+
+Prometheus runs at `http://localhost:9090` when you start BOOM with Docker Compose.
+
+Open the Prometheus UI to query metrics and visualize pipeline performance.
+
+## Architecture
+
+BOOM uses the OpenTelemetry SDK to export metrics:
+
+```mermaid
+graph LR
+    A[BOOM Binaries] --> B[OTel SDK]
+    B --> C[OTLP Exporter]
+    C --> D[OTel Collector]
+    D --> E[Prometheus]
+    E --> F[Prometheus UI]
+```
+
+### Metrics initialization
+
+Each BOOM binary initializes metrics on startup:
+
+```rust src/bin/scheduler.rs
+let meter_provider = init_metrics(
+    String::from("scheduler"),
+    instance_id,
+    deployment_env.clone(),
+)
+.expect("failed to initialize metrics");
+```
+
+### Metric labels
+
+All metrics include resource attributes:
+
+- `service.name`: Binary name (`scheduler`, `consumer`, `producer`)
+- `service.instance.id`: Unique UUID for this instance
+- `service.namespace`: Always `"boom"`
+- `service.version`: BOOM version from `Cargo.toml`
+- `deployment.environment.name`: Deployment environment (`dev`, `prod`, etc.)
+
+<Note>
+The `instance_id` distinguishes metrics from multiple instances of the same service running in parallel.
+</Note>
+
+## Kafka consumer metrics
+
+### kafka_consumer_alert_processed_total
+
+**Type**: Counter  
+**Unit**: `{alert}`  
+**Description**: Total number of alerts consumed from Kafka
+
+#### Example queries
+
+<CodeGroup>
+
+```promql Total alerts consumed
+kafka_consumer_alert_processed_total
+```
+
+```promql Consumption rate (alerts/second)
+irate(kafka_consumer_alert_processed_total[5m])
+```
+
+```promql Alerts consumed in last hour
+increase(kafka_consumer_alert_processed_total[1h])
+```
+
+</CodeGroup>
+
+### Pre-built queries
+
+BOOM includes [pre-configured Prometheus queries](http://localhost:9090/query?g0.expr=%23+Total+number+of+alerts+processed+by+the+alert+workers%0Akafka_consumer_alert_processed_total&g0.show_tree=0&g0.tab=table&g0.range_input=30m&g1.expr=%23+Instantaneous+throughput+%28alert%2Fs%29%0Airate%28kafka_consumer_alert_processed_total%5B5m%5D%29&g1.show_tree=0&g1.tab=graph&g1.range_input=30m) for the Kafka consumer.
+
+## Alert worker metrics
+
+### alert_worker_active
+
+**Type**: UpDownCounter  
+**Unit**: `{alert}`  
+**Description**: Number of alerts currently being processed by alert workers
+
+This gauge increases when workers start processing an alert and decreases when they finish.
+
+### alert_worker_alert_processed_total
+
+**Type**: Counter  
+**Unit**: `{alert}`  
+**Description**: Total number of alerts processed by alert workers
+
+**Labels**:
+- `status`: Processing outcome (`success`, `error`)
+
+#### Example queries
+
+<CodeGroup>
+
+```promql Processing rate by status
+sum by (status) (irate(alert_worker_alert_processed_total[5m]))
+```
+
+```promql Error rate
+rate(alert_worker_alert_processed_total{status="error"}[5m])
+```
+
+```promql Success percentage
+sum(rate(alert_worker_alert_processed_total{status="success"}[5m]))
+/
+sum(rate(alert_worker_alert_processed_total[5m]))
+* 100
+```
+
+</CodeGroup>
+
+### Pre-built queries
+
+Access [pre-configured alert worker queries](http://localhost:9090/query?g0.expr=%23+Total+number+of+alerts+processed+by+the+alert+workers%0Aalert_worker_alert_processed_total&g0.show_tree=0&g0.tab=table&g0.range_input=30m&g1.expr=%23+Instantaneous+throughput+%28alert%2Fs%29%0Airate%28alert_worker_alert_processed_total%5B5m%5D%29&g1.show_tree=0&g1.tab=graph&g1.range_input=30m) in Prometheus.
+
+## Enrichment worker metrics
+
+### enrichment_worker_active
+
+**Type**: UpDownCounter  
+**Unit**: `{alert}`  
+**Description**: Number of alerts currently being enriched
+
+### enrichment_worker_batch_processed_total
+
+**Type**: Counter  
+**Unit**: `{batch}`  
+**Description**: Total number of enrichment batches processed
+
+### enrichment_worker_alert_processed_total
+
+**Type**: Counter  
+**Unit**: `{alert}`  
+**Description**: Total number of alerts enriched
+
+**Labels**:
+- `status`: Processing outcome (`success`, `error`)
+
+#### Example queries
+
+<CodeGroup>
+
+```promql Average batch size
+irate(enrichment_worker_alert_processed_total[5m])
+/
+irate(enrichment_worker_batch_processed_total[5m])
+```
+
+```promql Enrichment throughput
+sum(irate(enrichment_worker_alert_processed_total[5m]))
+```
+
+```promql Active enrichment workers
+enrichment_worker_active
+```
+
+</CodeGroup>
+
+<Tip>
+Monitor average batch size to optimize enrichment worker performance. Larger batches generally improve throughput.
+</Tip>
+
+### Pre-built queries
+
+View [pre-configured enrichment worker queries](http://localhost:9090/query?g0.expr=%23+Total+number+of+alerts+processed+by+the+enrichment+workers%0Aenrichment_worker_alert_processed_total&g0.show_tree=0&g0.tab=table&g0.range_input=30m&g1.expr=%23+Instantaneous+throughput+%28alert%2Fs%29%0Airate%28enrichment_worker_alert_processed_total%5B5m%5D%29&g1.show_tree=0&g1.tab=graph&g1.range_input=30m&g3.expr=%23+Number+of+alerts+per+batch%2C+averaged+over+the+collection+interval%0Airate%28enrichment_worker_alert_processed_total%5B5m%5D%29+%2F+irate%28enrichment_worker_batch_processed_total%5B5m%5D%29&g3.show_tree=0&g3.tab=graph&g3.range_input=30m).
+
+## Filter worker metrics
+
+### filter_worker_active
+
+**Type**: UpDownCounter  
+**Unit**: `{alert}`  
+**Description**: Number of alerts currently being filtered
+
+### filter_worker_batch_processed_total
+
+**Type**: Counter  
+**Unit**: `{batch}`  
+**Description**: Total number of filter batches executed
+
+### filter_worker_alert_processed_total
+
+**Type**: Counter  
+**Unit**: `{alert}`  
+**Description**: Total number of alerts processed by filters
+
+**Labels**:
+- `reason`: Filter outcome (`passed`, `failed`)
+
+#### Example queries
+
+<CodeGroup>
+
+```promql Filter pass rate
+sum(rate(filter_worker_alert_processed_total{reason="passed"}[5m]))
+/
+sum(rate(filter_worker_alert_processed_total[5m]))
+* 100
+```
+
+```promql Alerts passing filters
+sum(irate(filter_worker_alert_processed_total{reason="passed"}[5m]))
+```
+
+```promql Average alerts per filter batch
+irate(filter_worker_alert_processed_total[5m])
+/
+irate(filter_worker_batch_processed_total[5m])
+```
+
+</CodeGroup>
+
+### Pre-built queries
+
+Access [pre-configured filter worker queries](http://localhost:9090/query?g0.expr=%23+Total+number+of+alerts+processed+by+the+filter+workers%0Afilter_worker_alert_processed_total&g0.show_tree=0&g0.tab=table&g0.range_input=30m&g1.expr=%23+Instantaneous+throughput+%28alert%2Fs%29%0Airate%28filter_worker_alert_processed_total%5B5m%5D%29&g1.show_tree=0&g1.tab=graph&g1.range_input=30m&g2.expr=%23+Average+processing+time+per+alert+%28s%29%0A1+%2F+irate%28filter_worker_alert_processed_total%5B5m%5D%29&g2.show_tree=0&g2.tab=graph&g2.range_input=30m).
+
+## Global meters
+
+BOOM defines separate meters for each binary:
+
+```rust src/utils/o11y/metrics.rs
+/// Global OTel meter for the kafka consumer
+pub static CONSUMER_METER: LazyLock<Meter> =
+    LazyLock::new(|| opentelemetry::global::meter("boom-consumer-meter"));
+
+/// Global OTel meter for the kafka producer
+pub static PRODUCER_METER: LazyLock<Meter> =
+    LazyLock::new(|| opentelemetry::global::meter("boom-producer-meter"));
+
+/// Global OTel meter for the scheduler
+pub static SCHEDULER_METER: LazyLock<Meter> =
+    LazyLock::new(|| opentelemetry::global::meter("boom-scheduler-meter"));
+```
+
+<Note>
+Separate meters prevent metric collisions when multiple binaries run simultaneously.
+</Note>
+
+## Metric export configuration
+
+Metrics are exported via OTLP over gRPC:
+
+```rust src/utils/o11y/metrics.rs
+let exporter = opentelemetry_otlp::MetricExporter::builder()
+    .with_temporality(Temporality::Cumulative)
+    .with_tonic()
+    .with_endpoint("https://localhost:4317/v1/metrics")
+    .build()?;
+
+let meter_provider = SdkMeterProvider::builder()
+    .with_resource(resource)
+    .with_periodic_exporter(exporter)  // Exports every 60 seconds
+    .build();
+```
+
+### Temporality
+
+BOOM uses **cumulative temporality**, which is more natural for Prometheus:
+
+- Counters report cumulative totals since process start
+- Prometheus calculates rates using `rate()` or `irate()`
+- Better compatibility with Prometheus than delta temporality
+
+## Dashboard examples
+
+### Pipeline throughput
+
+Visualize end-to-end pipeline throughput:
+
+```promql
+sum(irate(kafka_consumer_alert_processed_total[5m])) by (job)
+```
+
+### Worker health
+
+Monitor active workers across all stages:
+
+```promql
+sum(alert_worker_active) +
+sum(enrichment_worker_active) +
+sum(filter_worker_active)
+```
+
+### Error rates
+
+Track processing errors:
+
+```promql
+sum(rate(alert_worker_alert_processed_total{status="error"}[5m])) +
+sum(rate(enrichment_worker_alert_processed_total{status="error"}[5m]))
+```
+
+### Filter effectiveness
+
+Measure filter selectivity:
+
+```promql
+sum(rate(filter_worker_alert_processed_total{reason="passed"}[5m]))
+/
+sum(rate(filter_worker_alert_processed_total[5m]))
+```
+
+## Alerting
+
+### Example Prometheus alerts
+
+```yaml prometheus-alerts.yaml
+groups:
+  - name: boom
+    interval: 30s
+    rules:
+      - alert: HighErrorRate
+        expr: |
+          sum(rate(alert_worker_alert_processed_total{status="error"}[5m]))
+          /
+          sum(rate(alert_worker_alert_processed_total[5m]))
+          > 0.05
+        for: 5m
+        annotations:
+          summary: "Alert worker error rate above 5%"
+          
+      - alert: NoAlertsProcessed
+        expr: |
+          rate(kafka_consumer_alert_processed_total[5m]) == 0
+        for: 10m
+        annotations:
+          summary: "No alerts consumed in 10 minutes"
+          
+      - alert: FilterWorkerStalled
+        expr: |
+          filter_worker_active > 0
+          and
+          rate(filter_worker_batch_processed_total[5m]) == 0
+        for: 5m
+        annotations:
+          summary: "Filter workers stalled with active alerts"
+```
+
+## Graceful shutdown
+
+Metrics are flushed on graceful shutdown:
+
+```rust src/bin/scheduler.rs
+if let Err(error) = meter_provider.shutdown() {
+    log_error!(WARN, error, "failed to shut down the meter provider");
+}
+```
+
+<Warning>
+If a binary crashes or is killed with `SIGKILL`, final metrics may not be exported to Prometheus.
+</Warning>
+
+## Metric retention
+
+Prometheus retention is configured in the Docker Compose setup. By default:
+
+- Retention time: 15 days
+- Storage location: Docker volume
+
+Modify `docker-compose.yaml` to adjust retention settings.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Logging" icon="file-lines" href="/guides/logging">
+    Configure structured logging and tracing
+  </Card>
+  <Card title="Processing alerts" icon="filter" href="/guides/processing-alerts">
+    Understand the alert processing pipeline
+  </Card>
+  <Card title="Prometheus docs" icon="chart-line" href="https://prometheus.io/docs/">
+    Learn more about Prometheus query language
+  </Card>
+</CardGroup>

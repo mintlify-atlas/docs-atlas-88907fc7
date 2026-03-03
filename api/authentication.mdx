@@ -1,0 +1,181 @@
+---
+title: Authentication
+description: Authenticate with the BOOM API using JWT tokens
+---
+
+The BOOM API uses JWT (JSON Web Token) authentication to secure endpoints. You must obtain an access token before making requests to protected resources.
+
+## Obtain an access token
+
+<CodeGroup>
+```bash curl
+curl -X POST http://localhost:4000/auth \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "username=your_username&password=your_password"
+```
+
+```python Python
+import requests
+
+response = requests.post(
+    "http://localhost:4000/auth",
+    data={
+        "username": "your_username",
+        "password": "your_password"
+    }
+)
+
+token_data = response.json()
+access_token = token_data["access_token"]
+```
+
+```javascript JavaScript
+const response = await fetch('http://localhost:4000/auth', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/x-www-form-urlencoded',
+  },
+  body: new URLSearchParams({
+    username: 'your_username',
+    password: 'your_password'
+  })
+});
+
+const data = await response.json();
+const accessToken = data.access_token;
+```
+</CodeGroup>
+
+### Request
+
+<ParamField path="username" type="string" required>
+  Your BOOM username
+</ParamField>
+
+<ParamField path="password" type="string" required>
+  Your BOOM password
+</ParamField>
+
+### Response
+
+<ResponseField name="access_token" type="string">
+  JWT access token for authenticating requests
+</ResponseField>
+
+<ResponseField name="token_type" type="string">
+  Token type, always `Bearer`
+</ResponseField>
+
+<ResponseField name="expires_in" type="number">
+  Token expiration time in seconds (default: 604800 seconds / 7 days)
+</ResponseField>
+
+<Expandable title="Example response">
+```json
+{
+  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "token_type": "Bearer",
+  "expires_in": 604800
+}
+```
+</Expandable>
+
+## Using the access token
+
+Include the access token in the `Authorization` header of your requests:
+
+<CodeGroup>
+```bash curl
+curl http://localhost:4000/filters \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+```python Python
+import requests
+
+headers = {
+    "Authorization": f"Bearer {access_token}"
+}
+
+response = requests.get(
+    "http://localhost:4000/filters",
+    headers=headers
+)
+```
+
+```javascript JavaScript
+const response = await fetch('http://localhost:4000/filters', {
+  headers: {
+    'Authorization': `Bearer ${accessToken}`
+  }
+});
+```
+</CodeGroup>
+
+## Error responses
+
+### Invalid credentials
+
+If the username or password is incorrect, you'll receive a 401 Unauthorized response:
+
+```json
+{
+  "error": "invalid_client",
+  "error_description": "Invalid username or password"
+}
+```
+
+### Invalid request
+
+For malformed requests, you'll receive a 400 Bad Request response:
+
+```json
+{
+  "error": "invalid_request",
+  "error_description": "Error details"
+}
+```
+
+## Token expiration
+
+JWT tokens expire after 7 days by default. This can be configured in `config.yaml`:
+
+```yaml
+api:
+  auth:
+    token_expiration: 604800  # Expiration in seconds
+```
+
+When a token expires, you'll receive a 401 Unauthorized response. Simply request a new token using the authentication endpoint.
+
+## Configuration
+
+Authentication settings are configured via environment variables:
+
+<ParamField path="BOOM_API__AUTH__SECRET_KEY" type="string" required>
+  Secret key for signing JWT tokens. Must be set for security.
+</ParamField>
+
+<ParamField path="BOOM_API__AUTH__ADMIN_USERNAME" type="string">
+  Username for the default admin account (default: `admin`)
+</ParamField>
+
+<ParamField path="BOOM_API__AUTH__ADMIN_PASSWORD" type="string" required>
+  Password for the default admin account. Must be set.
+</ParamField>
+
+<ParamField path="BOOM_API__AUTH__ADMIN_EMAIL" type="string">
+  Email for the default admin account (default: `admin@example.com`)
+</ParamField>
+
+## Security best practices
+
+<Warning>
+  Never commit your secret key or credentials to version control. Always use environment variables.
+</Warning>
+
+- Store tokens securely and never expose them in client-side code
+- Use HTTPS in production to encrypt token transmission
+- Rotate your secret key periodically
+- Set a strong admin password
+- Request new tokens before they expire to maintain uninterrupted access

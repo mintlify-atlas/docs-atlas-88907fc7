@@ -1,80 +1,396 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quick start
+description: Get BOOM up and running in minutes and process your first astronomical alerts
 ---
 
-## Get started in three steps
+# Quick start
 
-Get your documentation site running locally and make your first customization.
+This guide will walk you through processing your first astronomical alerts with BOOM using archived ZTF data.
 
-### Step 1: Set up your local environment
+<Note>
+  This quickstart assumes you have completed the [installation guide](/installation) and have all services running via Docker Compose.
+</Note>
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
+## Overview
+
+BOOM's alert processing pipeline consists of three main components:
+
+1. **Kafka Producer**: Publishes alerts to Kafka topics (for testing with archived data)
+2. **Kafka Consumer**: Reads alerts from Kafka and queues them in Redis/Valkey
+3. **Scheduler**: Manages workers that process, enrich, and filter alerts
+
+Let's run through a complete example using public ZTF alerts.
+
+## Verify services are running
+
+First, ensure all Docker services are running:
+
+```bash
+docker ps
+```
+
+You should see containers for:
+- `mongo` (MongoDB)
+- `valkey` (Redis fork)
+- `broker` (Kafka)
+- `prometheus` (Metrics)
+
+## Step 1: Produce test alerts
+
+BOOM can process alerts from the [ZTF public archive](https://ztf.uw.edu/alerts/public/). Let's produce alerts from June 17, 2024:
+
+```bash
+cargo run --release --bin kafka_producer ztf 20240617 public
+```
+
+<Note>
+  The producer will download archived ZTF alerts and publish them to a Kafka topic. Leave this running in your terminal.
+</Note>
+
+### Producer command syntax
+
+The `kafka_producer` binary accepts the following arguments:
+
+```bash
+cargo run --release --bin kafka_producer <SURVEY> [DATE] [PROGRAMID]
+```
+
+- `<SURVEY>`: Survey name (e.g., `ztf`, `lsst`, `decam`)
+- `[DATE]`: Observation date in YYYYMMDD format
+- `[PROGRAMID]`: Program identifier (e.g., `public` for ZTF public alerts)
+
+To see all available options:
+
+```bash
+cargo run --release --bin kafka_producer -- --help
+```
+
+### Clear Kafka topic (optional)
+
+If you want to clear the Kafka topic before starting:
+
+```bash
+docker exec -it broker /opt/kafka/bin/kafka-topics.sh \
+  --bootstrap-server broker:9092 \
+  --delete \
+  --topic ztf_20240617_public
+```
+
+## Step 2: Consume alerts
+
+In a new terminal, start the Kafka consumer to read alerts and queue them for processing:
+
+```bash
+cargo run --release --bin kafka_consumer ztf 20240617 --programids public
+```
+
+The consumer will:
+1. Read alerts from the Kafka topic
+2. Transfer them to Redis/Valkey in-memory queues
+3. Make them available for the processing pipeline
+
+### Consumer command syntax
+
+```bash
+cargo run --release --bin kafka_consumer <SURVEY> [DATE] --programids [PROGRAMIDS]
+```
+
+- `<SURVEY>`: Survey name (must match producer)
+- `[DATE]`: Observation date (must match producer)
+- `--programids`: Comma-separated list of program IDs
+
+## Step 3: Start the scheduler
+
+In a third terminal, start the scheduler to process alerts:
+
+```bash
+cargo run --release --bin scheduler ztf
+```
+
+The scheduler will:
+1. Spawn alert ingestion workers to format and enrich alerts
+2. Spawn enrichment workers to run classifiers
+3. Spawn filter workers to execute user-defined filters
+4. Manage worker lifecycle and monitor system health
+
+### What you'll see
+
+The scheduler prints diagnostic messages:
+
+<Steps>
+  <Step title="Alert ingestion">
+    ```
+    Processed alert with candid: 2479571234567, queueing for classification
+    ```
+    Alert workers are processing alerts and queuing them for enrichment.
+  </Step>
+  <Step title="Enrichment">
+    ```
+    received alerts len: 50
+    ```
+    Enrichment workers are processing batches of alerts and running classifiers.
+  </Step>
+  <Step title="Heartbeat">
+    ```
+    heart beat (MAIN)
+    ```
+    The scheduler is running and managing workers correctly.
+  </Step>
+</Steps>
+
+<Note>
+  You won't see filter worker output initially because no filters are defined. Filter management via the API is coming in a future release.
+</Note>
+
+## Step 4: Monitor metrics
+
+BOOM exposes Prometheus metrics for monitoring pipeline performance. Open your browser to:
+
+```
+http://localhost:9090
+```
+
+### Useful metrics queries
+
+<CardGroup cols={2}>
+  <Card title="Kafka consumer" icon="chart-line">
+    View total alerts processed and instantaneous throughput
     
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
+    [View queries](http://localhost:9090/query?g0.expr=kafka_consumer_alert_processed_total&g1.expr=irate(kafka_consumer_alert_processed_total[5m]))
+  </Card>
+  <Card title="Alert workers" icon="chart-bar">
+    Monitor alert ingestion worker throughput and processing time
     
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 2: Deploy your changes
-
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
+    [View queries](http://localhost:9090/query?g0.expr=alert_worker_alert_processed_total&g1.expr=irate(alert_worker_alert_processed_total[5m]))
+  </Card>
+  <Card title="Enrichment workers" icon="chart-area">
+    Track enrichment worker performance and batch sizes
     
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+    [View queries](http://localhost:9090/query?g0.expr=enrichment_worker_alert_processed_total&g1.expr=irate(enrichment_worker_alert_processed_total[5m]))
+  </Card>
+  <Card title="Filter workers" icon="filter">
+    Monitor filter execution and alert matching
+    
+    [View queries](http://localhost:9090/query?g0.expr=filter_worker_alert_processed_total&g1.expr=irate(filter_worker_alert_processed_total[5m]))
+  </Card>
+</CardGroup>
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+## Configuration
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+BOOM's configuration is defined in `config.yaml` and can be overridden with environment variables.
 
-### Step 3: Go live
+### Worker configuration
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+The number of workers for each survey is configured in `config.yaml`:
+
+```yaml config.yaml
+workers:
+  ztf:
+    command_interval: 500
+    alert:
+      n_workers: 3
+    enrichment:
+      n_workers: 3
+    filter:
+      n_workers: 3
+```
+
+### Crossmatch catalogs
+
+BOOM enriches alerts by crossmatching with astronomical catalogs:
+
+```yaml config.yaml
+crossmatch:
+  ztf:
+    - catalog: PS1_DR1
+      radius: 2.0  # arcseconds
+      use_distance: false
+      projection:
+        _id: 1
+        gMeanPSFMag: 1
+        rMeanPSFMag: 1
+        iMeanPSFMag: 1
+    - catalog: Gaia_DR3
+      radius: 2.0
+      use_distance: false
+      projection:
+        _id: 1
+        parallax: 1
+        phot_g_mean_mag: 1
+    - catalog: NED
+      radius: 300.0
+      use_distance: true
+      distance_key: "z"
+      distance_max: 30.0
+```
+
+Supported catalogs:
+- **PS1_DR1**: Pan-STARRS1 Data Release 1
+- **Gaia_DR3**: Gaia Data Release 3
+- **milliquas_v6**: Million Quasars Catalog
+- **NED**: NASA/IPAC Extragalactic Database
+- **LSPSC**: Legacy Survey Proper Star Catalog
+
+### Database configuration
+
+Configure MongoDB connection:
+
+```yaml config.yaml
+database:
+  host: localhost
+  port: 27017
+  name: boom
+  max_pool_size: 200
+  username: mongoadmin
+  password: ""  # Set via BOOM_DATABASE__PASSWORD
+```
+
+### Kafka configuration
+
+Configure Kafka consumers for different surveys:
+
+```yaml config.yaml
+kafka:
+  consumer:
+    ztf:
+      server: "localhost:9092"
+      group_id: ""  # Set via BOOM_KAFKA__CONSUMER__ZTF__GROUP_ID
+    lsst:
+      server: "usdf-alert-stream-dev.lsst.cloud:9094"
+      schema_registry: "https://usdf-alert-schemas-dev.slac.stanford.edu"
+      group_id: ""  # Set via BOOM_KAFKA__CONSUMER__LSST__GROUP_ID
+      username: ""  # Set via BOOM_KAFKA__CONSUMER__LSST__USERNAME
+      password: ""  # Set via BOOM_KAFKA__CONSUMER__LSST__PASSWORD
+```
+
+## Logging
+
+BOOM uses the `RUST_LOG` environment variable to control logging levels:
+
+```bash
+RUST_LOG=debug cargo run --release --bin scheduler ztf
+```
+
+### Log levels
+
+- `trace`: Most verbose, includes all events
+- `debug`: Debugging information
+- `info`: Informational messages (default)
+- `warn`: Warning messages
+- `error`: Error messages only
+- `off`: Disable logging
+
+### Per-crate logging
+
+Control logging for specific crates:
+
+```bash
+# INFO for all crates, ERROR for ort (ONNX Runtime)
+RUST_LOG=info,ort=error cargo run --release --bin scheduler ztf
+
+# DEBUG for all, WARN for ort
+RUST_LOG=debug,ort=warn cargo run --release --bin scheduler ztf
+```
+
+### Span events
+
+Enable span lifecycle events for profiling:
+
+```bash
+BOOM_SPAN_EVENTS=new,close cargo run --release --bin scheduler ztf
+```
+
+Available span events:
+- `new`: Span creation
+- `enter`: Entering a span
+- `exit`: Exiting a span  
+- `close`: Span closure (includes execution time)
+- `active`: Active span changes
+- `full`: All span events
+- `none`: No span events
+
+### Complete example
+
+```bash
+RUST_LOG=debug,ort=warn BOOM_SPAN_EVENTS=new,close \
+  cargo run --release --bin scheduler ztf
+```
+
+## Stop BOOM
+
+To stop BOOM gracefully:
+
+<Steps>
+  <Step title="Stop the scheduler">
+    Press `CTRL+C` in the scheduler terminal. The scheduler will send interrupt signals to all workers.
+  </Step>
+  <Step title="Stop the consumer">
+    Press `CTRL+C` in the consumer terminal.
+  </Step>
+  <Step title="Stop the producer">
+    Press `CTRL+C` in the producer terminal.
+  </Step>
+  <Step title="Stop Docker services">
+    ```bash
+    docker compose down
+    ```
+  </Step>
+</Steps>
+
+<Warning>
+  Graceful shutdown is still in development. You may see error handling in the logs during shutdown.
+</Warning>
 
 ## Next steps
 
-Now that you have your docs running, explore these key features:
-
 <CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+  <Card title="Architecture" icon="sitemap">
+    Learn more about BOOM's modular architecture and worker types
+  </Card>
+  <Card title="Configuration" icon="gear">
+    Explore advanced configuration options for production deployments
+  </Card>
+  <Card title="API documentation" icon="code">
+    Explore the HTTP API for querying alerts and managing filters
+  </Card>
+  <Card title="Contributing" icon="github">
+    Contribute to BOOM development on GitHub
+  </Card>
 </CardGroup>
 
-<Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
-</Note>
+## Troubleshooting
+
+### No alerts being processed
+
+If the scheduler shows no activity:
+
+1. Verify the producer is running and publishing alerts
+2. Check the consumer is reading from the correct Kafka topic
+3. Ensure the survey name and date match across producer, consumer, and scheduler
+4. Check Docker services are healthy: `docker ps`
+
+### Connection errors
+
+If you see connection errors:
+
+1. Verify MongoDB is running: `docker ps | grep mongo`
+2. Verify Redis/Valkey is running: `docker ps | grep valkey`
+3. Verify Kafka is running: `docker ps | grep broker`
+4. Check environment variables in `.env` match `config.yaml`
+
+### High memory usage
+
+If BOOM consumes too much memory:
+
+1. Reduce the number of workers in `config.yaml`
+2. Reduce `max_pool_size` for MongoDB
+3. Monitor metrics in Prometheus to identify bottlenecks
+
+### Slow processing
+
+If alert processing is slow:
+
+1. Increase the number of workers in `config.yaml`
+2. Ensure you're running with `--release` flag for optimized builds
+3. Check system resources (CPU, memory, disk I/O)
+4. Review Prometheus metrics to identify bottlenecks

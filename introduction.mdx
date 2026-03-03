@@ -1,0 +1,92 @@
+---
+title: Introduction to BOOM
+description: A next generation astronomical alert broker built in Rust for processing and filtering real-time survey alerts at scale
+---
+
+# Welcome to BOOM
+
+BOOM (Burst & Outburst Observations Monitor) is a next generation astronomical alert broker written in Rust for processing and filtering real-time survey alerts at scale. What sets BOOM apart from other alert brokers is its modular, scalable, and performant architecture designed to handle high-volume astronomical data streams.
+
+## What is BOOM?
+
+BOOM processes astronomical alerts from surveys like ZTF (Zwicky Transient Facility), LSST (Rubin Observatory), and DECam, enriching them with crossmatches from archival catalogs and running user-defined filters to identify objects of scientific interest.
+
+<CardGroup cols={2}>
+  <Card title="Quick start" icon="rocket" href="/quickstart">
+    Get BOOM up and running in minutes with our quickstart guide
+  </Card>
+  <Card title="Installation" icon="download" href="/installation">
+    System requirements and installation instructions for macOS and Linux
+  </Card>
+  <Card title="Architecture" icon="sitemap" href="/concepts/architecture">
+    Learn about BOOM's modular worker-based architecture
+  </Card>
+  <Card title="Configuration" icon="gear" href="/concepts/configuration">
+    Configure databases, Kafka streams, and worker pools
+  </Card>
+</CardGroup>
+
+## Architecture overview
+
+BOOM's pipeline is composed of multiple types of workers, each with a specific task:
+
+<Steps>
+  <Step title="Kafka consumers">
+    Read alerts from astronomical surveys' Kafka topics and transfer them to Redis/Valkey in-memory queues
+  </Step>
+  <Step title="Alert ingestion workers">
+    Read alerts from Redis/Valkey queues, format them to BSON documents, and enrich them with crossmatches from archival astronomical catalogs before writing to MongoDB
+  </Step>
+  <Step title="Enrichment workers">
+    Run alerts through a series of enrichment classifiers and write results back to MongoDB
+  </Step>
+  <Step title="Filter workers">
+    Run user-defined filters on alerts and send results to Kafka topics for downstream services
+  </Step>
+</Steps>
+
+Workers are managed by a Scheduler that can spawn or kill workers of each type. Currently, the number of workers is static, but dynamic scaling based on system load is in development.
+
+## Key features
+
+- **High performance**: Written in Rust for maximum throughput and minimal latency
+- **Modular design**: Worker-based architecture allows independent scaling of pipeline components
+- **Multi-survey support**: Process alerts from ZTF, LSST, DECam, and other surveys
+- **Flexible enrichment**: Crossmatch alerts with catalogs like Gaia DR3, PS1, NED, and more
+- **Custom filters**: Define and deploy user filters for real-time alert classification
+- **Scalable infrastructure**: Built on Kafka, MongoDB, and Redis/Valkey for production-grade reliability
+- **Monitoring**: Integrated Prometheus metrics for observability
+
+## Technology stack
+
+BOOM leverages best-in-class technologies:
+
+- **Rust**: Systems programming language for performance and safety
+- **Kafka**: Message broker for alert streaming
+- **MongoDB**: Document database for flexible alert storage
+- **Redis/Valkey**: In-memory cache and task queue
+- **Docker**: Containerized services for easy deployment
+- **Prometheus**: Metrics and monitoring
+
+<Note>
+  BOOM also comes with an HTTP API (under development) which will allow users to query the MongoDB database, define their own filters, and have those filters run on alerts in real-time.
+</Note>
+
+## Supported surveys
+
+BOOM currently supports:
+
+- **ZTF (Zwicky Transient Facility)**: Public and partnership alerts
+- **LSST (Rubin Observatory)**: Vera C. Rubin Observatory alerts
+- **DECam**: Dark Energy Camera alerts
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Install BOOM" icon="download" href="/installation">
+    Set up your development environment
+  </Card>
+  <Card title="Quick start guide" icon="play" href="/quickstart">
+    Process your first alerts
+  </Card>
+</CardGroup>

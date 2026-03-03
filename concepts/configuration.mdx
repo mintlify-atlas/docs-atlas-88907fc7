@@ -1,0 +1,518 @@
+---
+title: Configuration
+description: Complete guide to configuring BOOM via config.yaml and environment variables
+---
+
+BOOM uses a combination of YAML configuration files and environment variables for flexible deployment across development and production environments.
+
+## Configuration file
+
+The main configuration file is `config.yaml` in the project root. You can specify an alternate path with the `--config` flag:
+
+```bash
+cargo run --bin scheduler ztf --config /path/to/config.yaml
+```
+
+## Configuration structure
+
+The configuration file is organized into sections:
+
+### Database configuration
+
+MongoDB connection settings:
+
+```yaml
+database:
+  host: localhost
+  port: 27017
+  name: boom
+  max_pool_size: 200
+  replica_set: null
+  username: mongoadmin
+  password: "" # Set via BOOM_DATABASE__PASSWORD environment variable
+  srv: false
+```
+
+<AccordionGroup>
+  <Accordion title="Parameters explained">
+    - **host**: MongoDB hostname or IP address
+    - **port**: MongoDB port (default: 27017)
+    - **name**: Database name for alert storage
+    - **max_pool_size**: Maximum concurrent database connections (important for worker scaling)
+    - **replica_set**: MongoDB replica set name (null for standalone)
+    - **username**: Database authentication username
+    - **password**: Set via environment variable for security
+    - **srv**: Use MongoDB SRV connection string (for Atlas)
+  </Accordion>
+</AccordionGroup>
+
+<Warning>
+  Set `max_pool_size` high enough for your total worker count. Each worker needs at least one connection.
+</Warning>
+
+### Redis configuration
+
+Redis/Valkey connection for in-memory queues:
+
+```yaml
+redis:
+  host: localhost
+  port: 6379
+```
+
+<Note>
+  Redis password authentication is not currently implemented but is planned for future releases.
+</Note>
+
+### Kafka configuration
+
+#### Consumer configuration
+
+Kafka consumer settings per survey:
+
+```yaml
+kafka:
+  consumer:
+    ztf:
+      server: "localhost:9092"
+      group_id: "" # Set via BOOM_KAFKA__CONSUMER__ZTF__GROUP_ID
+    lsst:
+      server: "usdf-alert-stream-dev.lsst.cloud:9094"
+      schema_registry: "https://usdf-alert-schemas-dev.slac.stanford.edu"
+      schema_github_fallback_url: "https://github.com/lsst/alert_packet/tree/main/python/lsst/alert/packet/schema"
+      group_id: "" # Set via BOOM_KAFKA__CONSUMER__LSST__GROUP_ID
+      username: "" # Set via BOOM_KAFKA__CONSUMER__LSST__USERNAME
+      password: "" # Set via BOOM_KAFKA__CONSUMER__LSST__PASSWORD
+    decam:
+      server: "localhost:9092"
+      group_id: "" # Set via BOOM_KAFKA__CONSUMER__DECAM__GROUP_ID
+```
+
+<AccordionGroup>
+  <Accordion title="ZTF consumer">
+    - **server**: Kafka broker address
+    - **group_id**: Consumer group ID for offset management
+    
+    ZTF alerts use embedded Avro schemas, so no schema registry is needed.
+  </Accordion>
+  
+  <Accordion title="LSST consumer">
+    - **server**: Kafka broker address (may require SASL authentication)
+    - **schema_registry**: Confluent Schema Registry URL for schema retrieval
+    - **schema_github_fallback_url**: GitHub repo URL for schema fallback if registry is unavailable
+    - **group_id**: Consumer group ID
+    - **username**: SASL username for authenticated access
+    - **password**: SASL password
+    
+    LSST alerts use schema registry with versioned schemas.
+  </Accordion>
+  
+  <Accordion title="DECam consumer">
+    - **server**: Kafka broker address
+    - **group_id**: Consumer group ID
+    
+    DECam configuration follows ZTF pattern.
+  </Accordion>
+</AccordionGroup>
+
+#### Producer configuration
+
+Kafka producer for filter output:
+
+```yaml
+kafka:
+  producer:
+    server: "localhost:9092" # Only one global producer for filter worker output
+```
+
+<Note>
+  There is currently only one producer configuration shared by all filter workers. Per-survey producers may be added in future releases.
+</Note>
+
+### Worker configuration
+
+Worker pool sizes per survey:
+
+```yaml
+workers:
+  ztf:
+    command_interval: 500
+    alert:
+      n_workers: 3
+    enrichment:
+      n_workers: 3
+    filter:
+      n_workers: 3
+  lsst:
+    command_interval: 500
+    alert:
+      n_workers: 4
+    enrichment:
+      n_workers: 3
+    filter:
+      n_workers: 1
+  decam:
+    command_interval: 500
+    alert:
+      n_workers: 1
+    enrichment:
+      n_workers: 0
+    filter:
+      n_workers: 1
+```
+
+<Info>
+  Setting `n_workers: 0` for a stage disables it entirely. For example, DECam enrichment is disabled by default.
+</Info>
+
+### Crossmatch configuration
+
+Catalog crossmatching parameters per survey:
+
+```yaml
+crossmatch:
+  ztf:
+    - catalog: PS1_DR1
+      radius: 2.0 # arcseconds
+      use_distance: false
+      projection:
+        _id: 1
+        gMeanPSFMag: 1
+        gMeanPSFMagErr: 1
+        rMeanPSFMag: 1
+        rMeanPSFMagErr: 1
+        iMeanPSFMag: 1
+        iMeanPSFMagErr: 1
+        zMeanPSFMag: 1
+        zMeanPSFMagErr: 1
+        yMeanPSFMag: 1
+        yMeanPSFMagErr: 1
+        ra: 1
+        dec: 1
+    - catalog: Gaia_DR3
+      radius: 2.0
+      use_distance: false
+      projection:
+        _id: 1
+        parallax: 1
+        parallax_error: 1
+        phot_g_mean_mag: 1
+        phot_bp_mean_mag: 1
+        phot_rp_mean_mag: 1
+        ra: 1
+        dec: 1
+    - catalog: NED
+      radius: 300.0
+      use_distance: true
+      distance_key: "z"
+      distance_max: 30.0
+      distance_max_near: 300.0
+      projection:
+        _id: 1
+        ra: 1
+        dec: 1
+        objtype: 1
+        z: 1
+        z_unc: 1
+        z_tech: 1
+        z_qual: 1
+        DistMpc: 1
+        DistMpc_unc: 1
+```
+
+<AccordionGroup>
+  <Accordion title="Crossmatch parameters">
+    - **catalog**: MongoDB collection name containing catalog data
+    - **radius**: Search radius in arcseconds
+    - **use_distance**: Enable distance-based filtering (for spectroscopic catalogs)
+    - **distance_key**: Field name containing distance/redshift (e.g., "z" for redshift)
+    - **distance_max**: Maximum distance in Mpc for extended search
+    - **distance_max_near**: Maximum search radius in arcseconds when nearby
+    - **projection**: MongoDB projection specifying which fields to return (reduces memory usage)
+    - **max_results**: Maximum number of matches to return (optional, defaults to 1)
+  </Accordion>
+</AccordionGroup>
+
+<Note>
+  Projections are critical for performance. Only include fields you need - large catalogs can have hundreds of fields.
+</Note>
+
+#### Distance-based crossmatching
+
+For catalogs like NED with distance information, BOOM can adjust the search radius based on the target's distance:
+
+- Nearby objects (within `distance_max_near` arcseconds): Use full `radius`
+- Distant objects: Scale radius based on physical distance up to `distance_max` Mpc
+
+This prevents missing associations for extended nearby galaxies while keeping search radii reasonable for distant objects.
+
+### API configuration
+
+HTTP API settings (under development):
+
+```yaml
+api:
+  domain: "localhost" # Set via BOOM_API__DOMAIN
+  port: 4000 # Set via BOOM_API__PORT
+  auth:
+    secret_key: "" # Set via BOOM_API__AUTH__SECRET_KEY
+    token_expiration: 604800 # JWT expiration in seconds (7 days)
+    admin_username: admin
+    admin_password: "" # Set via BOOM_API__AUTH__ADMIN_PASSWORD
+    admin_email: admin@example.com
+```
+
+<Warning>
+  The HTTP API is still under development. Not all features are implemented yet.
+</Warning>
+
+### Babamul configuration
+
+Babamul web interface settings:
+
+```yaml
+babamul:
+  enabled: false # Set via BOOM_BABAMUL__ENABLED
+  webapp_url: # Set via BOOM_BABAMUL__WEBAPP_URL
+  retention_days: 3
+```
+
+## Environment variables
+
+Sensitive configuration values should be set via environment variables, not committed to `config.yaml`.
+
+### Environment variable naming
+
+Environment variables use a hierarchical naming convention:
+
+```
+BOOM_{SECTION}__{SUBSECTION}__{FIELD}
+```
+
+Double underscores `__` represent nested levels in the YAML structure.
+
+### Common environment variables
+
+```bash
+# Database
+export BOOM_DATABASE__PASSWORD="your_mongo_password"
+
+# API authentication
+export BOOM_API__DOMAIN="api.boom.example.com"
+export BOOM_API__PORT="4000"
+export BOOM_API__AUTH__SECRET_KEY="your_jwt_secret"
+export BOOM_API__AUTH__ADMIN_PASSWORD="your_admin_password"
+
+# Kafka consumers
+export BOOM_KAFKA__CONSUMER__ZTF__GROUP_ID="boom-prod-ztf"
+export BOOM_KAFKA__CONSUMER__LSST__GROUP_ID="boom-prod-lsst"
+export BOOM_KAFKA__CONSUMER__LSST__USERNAME="your_lsst_username"
+export BOOM_KAFKA__CONSUMER__LSST__PASSWORD="your_lsst_password"
+
+# Babamul
+export BOOM_BABAMUL__ENABLED="true"
+export BOOM_BABAMUL__WEBAPP_URL="https://babamul.example.com"
+
+# Deployment metadata
+export BOOM_SCHEDULER_INSTANCE_ID="$(uuidgen)"
+export BOOM_CONSUMER_INSTANCE_ID="$(uuidgen)"
+export BOOM_DEPLOYMENT_ENV="production"
+```
+
+### .env file for development
+
+For local development, create a `.env` file in the project root:
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env` with your local settings:
+
+```bash
+# Database
+BOOM_DATABASE__PASSWORD=mongoadmin
+
+# Kafka
+BOOM_KAFKA__CONSUMER__ZTF__GROUP_ID=boom-dev-ztf
+```
+
+<Warning>
+  Never commit `.env` files to Git. The `.env` file is in `.gitignore` by default.
+</Warning>
+
+## Logging configuration
+
+Logging is configured via environment variables:
+
+### Log level
+
+Set the `RUST_LOG` environment variable:
+
+```bash
+# Simple levels
+export RUST_LOG=info
+export RUST_LOG=debug
+export RUST_LOG=error
+
+# Per-crate levels
+export RUST_LOG=info,ort=error  # Default: info level, ort crate errors only
+export RUST_LOG=debug,ort=warn  # Debug level, ort crate warnings and up
+```
+
+Available levels (from most to least verbose):
+- `trace`: Very detailed, includes function entry/exit
+- `debug`: Detailed information for debugging
+- `info`: General informational messages
+- `warn`: Warning messages
+- `error`: Error messages
+- `off`: Disable logging
+
+<Note>
+  The `ort` crate (ONNX Runtime) is noisy at INFO level, so BOOM defaults to filtering it to ERROR.
+</Note>
+
+### Span events
+
+Enable span lifecycle events for profiling:
+
+```bash
+export BOOM_SPAN_EVENTS=new,close
+```
+
+Options:
+- `new`: Log when spans are created
+- `enter`: Log when spans are entered
+- `exit`: Log when spans are exited
+- `close`: Log when spans close (includes execution time)
+- `active`: Log when spans become active
+- `full`: Enable all span events
+- `none`: Disable span events (default)
+
+<Info>
+  The `close` event is particularly useful as it includes execution time, helping identify performance bottlenecks.
+</Info>
+
+### Example: Debug mode with profiling
+
+```bash
+RUST_LOG=debug,ort=warn BOOM_SPAN_EVENTS=new,close \
+  cargo run --bin scheduler -- ztf
+```
+
+## Configuration validation
+
+BOOM validates configuration at startup and will exit with an error if:
+
+- Required fields are missing
+- Environment variables reference non-existent sections
+- Worker counts are negative
+- Database connection fails
+- Redis connection fails
+
+<Warning>
+  BOOM does not validate that Kafka brokers are reachable at startup. Kafka connection errors appear during runtime.
+</Warning>
+
+## Production configuration checklist
+
+<Steps>
+  <Step title="Security">
+    - Set all sensitive values via environment variables
+    - Use strong passwords for MongoDB and API authentication
+    - Never commit `.env` files or credentials to version control
+    - Use MongoDB replica sets with authentication in production
+  </Step>
+  
+  <Step title="Performance">
+    - Set `max_pool_size` ≥ total worker count
+    - Tune worker counts based on load testing
+    - Configure appropriate crossmatch radii (smaller = faster)
+    - Use projections to limit returned catalog fields
+  </Step>
+  
+  <Step title="Reliability">
+    - Configure Kafka consumer `group_id` for offset persistence
+    - Set unique `instance_id` for each scheduler/consumer instance
+    - Enable MongoDB replica sets for high availability
+    - Monitor queue depths and adjust worker counts
+  </Step>
+  
+  <Step title="Observability">
+    - Set `BOOM_DEPLOYMENT_ENV` to identify environments
+    - Configure log aggregation for `RUST_LOG=info` output
+    - Set up Prometheus scraping on port 9090
+    - Create alerts for high error rates and queue buildup
+  </Step>
+</Steps>
+
+## Multi-survey configuration
+
+BOOM can process multiple surveys simultaneously by running separate scheduler instances:
+
+```bash
+# Terminal 1: ZTF pipeline
+BOOM_SCHEDULER_INSTANCE_ID=ztf-scheduler-1 \
+  cargo run --release --bin scheduler ztf
+
+# Terminal 2: LSST pipeline
+BOOM_SCHEDULER_INSTANCE_ID=lsst-scheduler-1 \
+  cargo run --release --bin scheduler lsst
+```
+
+Each survey uses its own:
+- Redis queues: `alerts_ztf`, `alerts_lsst`
+- MongoDB collections: `alerts_ztf`, `alerts_lsst`
+- Worker pools (configured independently)
+- Kafka topics and consumer groups
+
+<Info>
+  Surveys share the same MongoDB database and Redis instance but use separate collections and queues.
+</Info>
+
+## Configuration tips
+
+### Development settings
+
+```yaml
+database:
+  max_pool_size: 50  # Lower for local dev
+workers:
+  ztf:
+    alert:
+      n_workers: 1  # Reduce for testing
+    enrichment:
+      n_workers: 1
+    filter:
+      n_workers: 1
+```
+
+```bash
+export RUST_LOG=debug,ort=error
+export BOOM_SPAN_EVENTS=close
+```
+
+### Production settings
+
+```yaml
+database:
+  max_pool_size: 200  # High for many workers
+  replica_set: "boom-rs0"  # Use replica set
+workers:
+  ztf:
+    alert:
+      n_workers: 5  # Scale for load
+    enrichment:
+      n_workers: 4
+    filter:
+      n_workers: 3
+```
+
+```bash
+export RUST_LOG=info,ort=error
+export BOOM_DEPLOYMENT_ENV=production
+```
+
+<Note>
+  Start with conservative worker counts and scale up based on monitoring data. Over-provisioning wastes resources; under-provisioning causes queue buildup.
+</Note>

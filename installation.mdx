@@ -1,0 +1,299 @@
+---
+title: Installation
+description: System requirements and installation instructions for BOOM on macOS and Linux
+---
+
+# Installation
+
+BOOM runs on macOS and Linux. Follow the instructions below to set up your development environment.
+
+<Note>
+  If you're on Windows, you must use WSL2 (Windows Subsystem for Linux) and install a Linux distribution like Ubuntu 24.04.
+</Note>
+
+## System requirements
+
+Before installing BOOM, ensure you have the following prerequisites:
+
+- **Docker and docker compose**: Used to run MongoDB, Redis/Valkey, and Kafka
+- **Rust >= 1.55.0**: Systems programming language used by BOOM
+- **tar**: Used to extract archived alerts for testing
+- **libssl, libsasl2**: Required for Rust crates that depend on native libraries for secure connections and authentication
+- **Kafka CLI tools**: Available with `brew install kafka` on macOS
+
+## Installation by platform
+
+<Tabs>
+  <Tab title="macOS">
+    ### Docker
+
+    On macOS we recommend using [Docker Desktop](https://www.docker.com/products/docker-desktop) to install Docker.
+
+    <Steps>
+      <Step title="Download Docker Desktop">
+        Visit the [Docker Desktop website](https://www.docker.com/products/docker-desktop) and download the installer for macOS.
+      </Step>
+      <Step title="Install and create account">
+        Follow the installation instructions. The website will ask you to "choose a plan", but you just need to create a free account that offers all the features you'll need.
+      </Step>
+      <Step title="Verify installation">
+        Open a terminal and verify the installation:
+        
+        ```bash
+        docker --version
+        docker compose version
+        ```
+      </Step>
+    </Steps>
+
+    ### Rust
+
+    You can install Rust using either [rustup](https://www.rust-lang.org/tools/install) (recommended) or [Homebrew](https://brew.sh/).
+
+    <CodeGroup>
+      ```bash rustup (recommended)
+      curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+      ```
+
+      ```bash Homebrew
+      brew install rust
+      ```
+    </CodeGroup>
+
+    <Note>
+      We recommend using rustup, as it allows you to easily switch between different versions of Rust and keep your installation up to date.
+    </Note>
+
+    Verify the installation:
+
+    ```bash
+    rustc --version
+    cargo --version
+    ```
+
+    ### System packages
+
+    System packages are essential for compiling and linking some Rust crates. Most should come with macOS by default, but if you encounter compilation errors, install them with Homebrew:
+
+    ```bash
+    brew install openssl@3 cyrus-sasl gnu-tar
+    ```
+
+    ### Kafka CLI tools
+
+    Install Kafka command-line tools:
+
+    ```bash
+    brew install kafka
+    ```
+  </Tab>
+
+  <Tab title="Linux">
+    ### Docker
+
+    You can either install Docker Desktop or Docker Engine (more lightweight).
+
+    <Tabs>
+      <Tab title="Docker Engine (recommended)">
+        Follow the [official installation instructions](https://docs.docker.com/engine/install/) for your specific Linux distribution.
+
+        After installing Docker Engine, install [docker compose](https://docs.docker.com/compose/install/).
+
+        Verify the installation:
+
+        ```bash
+        docker --version
+        docker compose version
+        ```
+      </Tab>
+
+      <Tab title="Docker Desktop">
+        Download and install [Docker Desktop](https://www.docker.com/products/docker-desktop) following the same instructions as for macOS.
+      </Tab>
+    </Tabs>
+
+    ### Rust
+
+    Install Rust using [rustup](https://www.rust-lang.org/tools/install):
+
+    ```bash
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+    ```
+
+    Verify the installation:
+
+    ```bash
+    rustc --version
+    cargo --version
+    ```
+
+    ### System packages
+
+    System packages are essential for compiling and linking Rust crates. Install them with your package manager.
+
+    <CodeGroup>
+      ```bash Ubuntu/Debian
+      sudo apt update
+      sudo apt install build-essential pkg-config libssl-dev libsasl2-dev -y
+      ```
+
+      ```bash Fedora/RHEL
+      sudo dnf install gcc gcc-c++ make pkgconfig openssl-devel cyrus-sasl-devel -y
+      ```
+
+      ```bash Arch Linux
+      sudo pacman -S base-devel openssl libsasl
+      ```
+    </CodeGroup>
+
+    ### wget and tar
+
+    Most Linux distributions come with `wget` and `tar` pre-installed. If not, install them with your package manager:
+
+    ```bash
+    # Ubuntu/Debian
+    sudo apt install wget tar
+
+    # Fedora/RHEL
+    sudo dnf install wget tar
+
+    # Arch Linux
+    sudo pacman -S wget tar
+    ```
+  </Tab>
+</Tabs>
+
+## Clone the repository
+
+Clone the BOOM repository from GitHub:
+
+```bash
+git clone https://github.com/boom-astro/boom.git
+cd boom
+```
+
+## Environment configuration
+
+BOOM uses environment variables for sensitive configuration like passwords and API keys.
+
+<Steps>
+  <Step title="Copy the example environment file">
+    ```bash
+    cp .env.example .env
+    ```
+  </Step>
+  <Step title="Edit configuration (optional)">
+    For local development, the defaults in `.env.example` work fine. For production, update the following:
+
+    - `BOOM_DATABASE__PASSWORD`: MongoDB admin password
+    - `BOOM_API__AUTH__SECRET_KEY`: JWT secret key (at least 32 characters)
+    - `BOOM_API__AUTH__ADMIN_PASSWORD`: Admin API password
+    - `KAFKA_ADMIN_PASSWORD`: Kafka admin password
+    - `KAFKA_READONLY_PASSWORD`: Kafka read-only user password
+  </Step>
+</Steps>
+
+<Warning>
+  Do not commit `.env` to Git or use the example values in production. Always use strong, unique passwords for production deployments.
+</Warning>
+
+### Email configuration (optional)
+
+To send emails for notifications and Babamul account activation codes, configure the email-related environment variables in `.env`:
+
+```bash
+EMAIL_ENABLED=true
+SMTP_SERVER=smtp.example.com
+SMTP_USERNAME=boom_service
+SMTP_PASSWORD=your_smtp_password
+SMTP_FROM_ADDRESS=boom@example.com
+```
+
+<Note>
+  If email is not configured or disabled, Babamul activation codes will be printed to the console logs instead.
+</Note>
+
+## Start services
+
+Launch the required services using Docker Compose:
+
+```bash
+docker compose --profile api up -d
+```
+
+This starts:
+- **Valkey** (Redis fork): In-memory cache and task queue
+- **MongoDB**: Document database for alert storage
+- **Kafka**: Message broker for alert streaming
+- **BOOM API**: HTTP API server (in development)
+- **Prometheus**: Metrics and monitoring
+
+<Note>
+  This may take a couple of minutes the first time you run it, as Docker needs to download the images for each service.
+</Note>
+
+Verify the containers are running:
+
+```bash
+docker ps
+```
+
+You should see containers for `mongo`, `valkey`, `broker` (Kafka), and other services.
+
+## Build BOOM
+
+Build the Rust binaries:
+
+```bash
+cargo build --release
+```
+
+<Note>
+  The `--release` flag enables optimizations for better performance. The first build may take several minutes as Cargo compiles all dependencies.
+</Note>
+
+## Verify installation
+
+Verify BOOM is ready by checking the available binaries:
+
+```bash
+# List available BOOM binaries
+ls -la target/release/
+```
+
+You should see binaries including:
+- `kafka_consumer`
+- `kafka_producer`
+- `scheduler`
+
+## Next steps
+
+<Card title="Quick start guide" icon="rocket" href="/quickstart">
+  Now that BOOM is installed, follow the quickstart guide to process your first alerts
+</Card>
+
+## Troubleshooting
+
+### Compilation errors
+
+If you encounter compilation errors related to missing libraries:
+
+- **macOS**: Install system packages with `brew install openssl@3 cyrus-sasl gnu-tar`
+- **Linux**: Ensure you have `libssl-dev` and `libsasl2-dev` installed
+
+### Docker issues
+
+If Docker Compose fails to start:
+
+1. Ensure Docker is running: `docker info`
+2. Check container logs: `docker compose logs`
+3. Verify port availability: Ports 4000, 6379, 9092, 27017, and 9090 must be available
+
+### Permission errors
+
+If you encounter permission errors with Docker on Linux, add your user to the docker group:
+
+```bash
+sudo usermod -aG docker $USER
+newgrp docker
+```

@@ -1,0 +1,125 @@
+---
+title: API overview
+description: Introduction to the BOOM API for querying astronomical alert data
+---
+
+The BOOM API provides programmatic access to astronomical alert data from multiple surveys including ZTF, LSST, and DECam. The API enables you to create filters, query alert catalogs, and manage users.
+
+## Base URL
+
+The API is accessible at:
+
+```text
+http://localhost:4000
+```
+
+The domain and port can be configured via environment variables:
+- `BOOM_API__DOMAIN` - API domain (default: `localhost`)
+- `BOOM_API__PORT` - API port (default: `4000`)
+
+## API structure
+
+The BOOM API is organized into several main sections:
+
+### Authentication
+
+Secure access to the API using JWT tokens. All protected endpoints require authentication.
+
+- `POST /auth` - Obtain an access token
+
+### Filters
+
+Create and manage alert filters using MongoDB aggregation pipelines.
+
+- `GET /filters` - List your filters
+- `POST /filters` - Create a new filter
+- `GET /filters/{filter_id}` - Get a specific filter
+- `PATCH /filters/{filter_id}` - Update filter metadata
+- `POST /filters/{filter_id}/versions` - Add a new filter version
+- `POST /filters/test` - Test a filter pipeline
+- `POST /filters/test/count` - Get count of alerts matching a filter
+- `GET /filters/schemas/{survey_name}` - Get filter data schema for a survey
+
+### Queries
+
+Execute analytical queries against alert catalogs.
+
+- `POST /queries/find` - Find documents matching criteria
+- `POST /queries/count` - Count documents matching a filter
+- `POST /queries/estimated_count` - Get estimated document count
+- `POST /queries/cone_search` - Perform cone search queries
+- `POST /queries/pipeline` - Execute custom aggregation pipelines
+
+### Users
+
+Manage user accounts (admin only).
+
+- `GET /users` - List all users
+- `POST /users` - Create a new user
+- `DELETE /users/{user_id}` - Delete a user
+
+## Response format
+
+All API responses follow a consistent JSON structure:
+
+```json
+{
+  "message": "success",
+  "data": {
+    // Response data here
+  }
+}
+```
+
+For errors, the response includes an error message:
+
+```json
+{
+  "message": "Error description"
+}
+```
+
+## HTTP status codes
+
+The API uses standard HTTP status codes:
+
+| Status Code | Meaning |
+|-------------|----------|
+| 200 | Success |
+| 400 | Bad request - invalid parameters |
+| 401 | Unauthorized - authentication required |
+| 403 | Forbidden - insufficient permissions |
+| 404 | Not found - resource doesn't exist |
+| 409 | Conflict - resource already exists |
+| 500 | Internal server error |
+
+## Supported surveys
+
+BOOM supports the following astronomical surveys:
+
+- **ZTF** - Zwicky Transient Facility
+- **LSST** - Legacy Survey of Space and Time
+- **DECam** - Dark Energy Camera
+
+Each survey has its own data schema and requirements. Some surveys require specific permissions to access their data.
+
+## Rate limiting
+
+Query timeouts can be configured using the `max_time_ms` parameter available in query endpoints. This prevents long-running queries from consuming excessive resources.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Authentication" icon="key" href="/api/authentication">
+    Learn how to authenticate and obtain access tokens
+  </Card>
+  <Card title="Filters" icon="filter" href="/api/filters">
+    Create and manage alert filters
+  </Card>
+  <Card title="Queries" icon="magnifying-glass" href="/api/queries">
+    Query alert catalogs and run analyses
+  </Card>
+  <Card title="Users" icon="users" href="/api/users">
+    Manage user accounts
+  </Card>
+</CardGroup>

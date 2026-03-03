@@ -1,0 +1,251 @@
+---
+title: Running BOOM
+description: Learn how to start and manage BOOM's pipeline components
+---
+
+BOOM's pipeline consists of three main components that work together to process astronomical alerts. This guide covers how to run each component.
+
+## Starting the services
+
+Before running BOOM, start the required infrastructure services using Docker Compose:
+
+```bash
+docker compose --profile api up -d
+```
+
+This launches:
+- Valkey (in-memory queue)
+- MongoDB (alert storage)
+- Kafka (message streaming)
+- BOOM API server
+
+Verify the containers are running:
+
+```bash
+docker ps
+```
+
+## Building BOOM
+
+Build the Rust binaries with optimizations:
+
+```bash
+cargo build --release
+```
+
+<Note>
+Use the `--release` flag for better performance. Debug builds are significantly slower.
+</Note>
+
+## Pipeline components
+
+<Steps>
+
+<Step title="Start the Kafka producer (optional)">
+
+For testing with archival data, start a Kafka producer to simulate real-time alerts:
+
+```bash
+cargo run --release --bin kafka_producer <SURVEY> [DATE] [PROGRAMID]
+```
+
+### Parameters
+
+- `SURVEY`: Survey name (`ztf`, `lsst`, or `decam`)
+- `DATE`: UTC date in `YYYYMMDD` format (optional, defaults to yesterday)
+- `PROGRAMID`: Program identifier (ZTF: `public`, `partnership`, or `caltech`)
+
+### Example: ZTF public alerts
+
+```bash
+cargo run --release --bin kafka_producer ztf 20240617 public
+```
+
+This downloads and produces ZTF public alerts from June 17, 2024.
+
+<Tip>
+Leave the producer running in a separate terminal while you start the consumer and scheduler.
+</Tip>
+
+### Additional options
+
+View all available options:
+
+```bash
+cargo run --release --bin kafka_producer -- --help
+```
+
+Options include:
+- `--limit`: Limit the number of alerts produced
+- `--server-url`: Override the Kafka broker URL (default: `localhost:9092`)
+
+</Step>
+
+<Step title="Start the Kafka consumer">
+
+The consumer reads alerts from Kafka topics and transfers them to Valkey queues:
+
+```bash
+cargo run --release --bin kafka_consumer <SURVEY> [DATE] --programids [PROGRAMIDS]
+```
+
+### Parameters
+
+- `SURVEY`: Survey name to consume from
+- `DATE`: UTC date in `YYYYMMDD` format (optional, defaults to today)
+- `--programids`: Comma-separated program IDs (default: `public`)
+
+### Example: ZTF consumer
+
+```bash
+cargo run --release --bin kafka_consumer ztf 20240617 --programids public
+```
+
+### Advanced options
+
+<CodeGroup>
+
+```bash Configuration file
+cargo run --release --bin kafka_consumer ztf 20240617 \
+  --config /path/to/config.yaml
+```
+
+```bash Multiple programs
+cargo run --release --bin kafka_consumer ztf 20240617 \
+  --programids public,partnership,caltech
+```
+
+```bash Parallel processing
+cargo run --release --bin kafka_consumer ztf 20240617 \
+  --processes 4 \
+  --max-in-queue 20000
+```
+
+```bash Clear queue
+cargo run --release --bin kafka_consumer ztf 20240617 \
+  --clear
+```
+
+</CodeGroup>
+
+### Consumer options
+
+| Option | Description | Default |
+|--------|-------------|----------|
+| `--config` | Path to configuration file | `config.yaml` |
+| `--processes` | Number of parallel Kafka readers | `1` |
+| `--max-in-queue` | Maximum alerts in Valkey queue | `15000` |
+| `--clear` | Clear the Valkey queue before starting | `false` |
+| `--exit-on-eof` | Exit when topic is empty (testing only) | `false` |
+| `--topics-override` | Override default topic names | None |
+| `--instance-id` | UUID for this consumer instance | Auto-generated |
+
+</Step>
+
+<Step title="Start the scheduler">
+
+The scheduler manages worker pools that process alerts:
+
+```bash
+cargo run --release --bin scheduler <SURVEY> [--config CONFIG_PATH]
+```
+
+### Parameters
+
+- `SURVEY`: Survey to process alerts for (`ztf`, `lsst`, or `decam`)
+- `--config`: Path to configuration file (default: `config.yaml`)
+
+### Example: ZTF scheduler
+
+```bash
+cargo run --release --bin scheduler ztf
+```
+
+The scheduler spawns three types of workers based on your configuration:
+
+1. **Alert workers**: Ingest alerts from Valkey, format to BSON, perform crossmatches, and write to MongoDB
+2. **Enrichment workers**: Run classification models on alerts and update MongoDB
+3. **Filter workers**: Execute user-defined filters and send matching alerts to Kafka
+
+### Scheduler output
+
+You should see messages like:
+
+```
+Processed alert with candid: 2462315415115010042, queueing for classification
+received alerts len: 100
+heartbeat: workers running alert=3/3 enrichment=3/3 filter=3/3
+```
+
+<Note>
+The number of workers for each type is configured in `config.yaml` under the `workers` section.
+</Note>
+
+### Worker configuration
+
+Edit `config.yaml` to adjust worker counts:
+
+```yaml config.yaml
+workers:
+  ztf:
+    command_interval: 500
+    alert:
+      n_workers: 3
+    enrichment:
+      n_workers: 3
+    filter:
+      n_workers: 3
+```
+
+</Step>
+
+</Steps>
+
+## Stopping BOOM
+
+To gracefully shut down BOOM:
+
+1. Stop the consumer with `Ctrl+C`
+2. Stop the scheduler with `Ctrl+C`
+
+The scheduler will attempt to gracefully stop all workers by sending interrupt signals.
+
+<Warning>
+Graceful shutdown is still being improved. You may see error handling in the logs during shutdown.
+</Warning>
+
+To stop all Docker services:
+
+```bash
+docker compose down
+```
+
+## Clearing Kafka topics
+
+If you need to clear a Kafka topic before restarting the producer:
+
+```bash
+docker exec -it broker /opt/kafka/bin/kafka-topics.sh \
+  --bootstrap-server broker:9092 \
+  --delete \
+  --topic ztf_YYYYMMDD_programid
+```
+
+Replace `YYYYMMDD` with the date and `programid` with your program ID.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Processing alerts" icon="filter" href="/guides/processing-alerts">
+    Learn how alerts flow through the pipeline
+  </Card>
+  <Card title="Creating filters" icon="code" href="/guides/creating-filters">
+    Write custom filters to identify interesting alerts
+  </Card>
+  <Card title="Monitoring" icon="chart-line" href="/guides/monitoring">
+    Monitor pipeline performance with Prometheus
+  </Card>
+  <Card title="Logging" icon="file-lines" href="/guides/logging">
+    Configure logging and debugging output
+  </Card>
+</CardGroup>

@@ -1,0 +1,474 @@
+---
+title: Creating filters
+description: Write MongoDB aggregation pipelines to identify interesting astronomical alerts
+---
+
+Filters in BOOM are MongoDB aggregation pipelines that select alerts matching specific criteria. This guide shows you how to create and deploy filters.
+
+## Filter basics
+
+Filters use [MongoDB aggregation pipelines](https://www.mongodb.com/docs/manual/core/aggregation-pipeline/) to query alert documents. When an alert matches a filter, it's published to a Kafka output topic.
+
+### Filter structure
+
+A filter consists of:
+
+- **Metadata**: Name, description, survey, permissions
+- **Pipeline**: JSON array of MongoDB aggregation stages
+- **Versions**: Multiple pipeline versions with changelog
+
+```json
+{
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "name": "Bright transients",
+  "description": "Alerts brighter than magnitude 18",
+  "active": true,
+  "user_id": "alice",
+  "survey": "ZTF",
+  "permissions": {
+    "ZTF": [1, 2, 3]
+  },
+  "active_fid": "v2e0fs",
+  "fv": [
+    {
+      "fid": "v2e0fs",
+      "pipeline": "[{\"$match\":{\"candidate.magpsf\":{\"$lt\":18}}}]",
+      "created_at": 2459123.5,
+      "changelog": "Initial version"
+    }
+  ],
+  "created_at": 2459123.5,
+  "updated_at": 2459123.5
+}
+```
+
+## Writing filter pipelines
+
+Filter pipelines are JSON arrays of aggregation stages. Common stages include:
+
+### $match: Select alerts
+
+The `$match` stage filters documents based on field values:
+
+```json
+[
+  {
+    "$match": {
+      "candidate.magpsf": { "$lt": 18 },
+      "candidate.rb": { "$gt": 0.55 }
+    }
+  }
+]
+```
+
+This selects alerts where:
+- PSF magnitude is brighter than 18
+- RealBogus score is greater than 0.55
+
+### $addFields: Compute derived values
+
+```json
+[
+  {
+    "$addFields": {
+      "flux_ratio": {
+        "$divide": [
+          "$candidate.flux",
+          "$candidate.fluxerr"
+        ]
+      }
+    }
+  },
+  {
+    "$match": {
+      "flux_ratio": { "$gt": 5 }
+    }
+  }
+]
+```
+
+This computes a signal-to-noise ratio and selects high-SNR alerts.
+
+### $project: Shape output
+
+```json
+[
+  {
+    "$project": {
+      "_id": 1,
+      "objectId": 1,
+      "candidate.ra": 1,
+      "candidate.dec": 1,
+      "candidate.magpsf": 1
+    }
+  }
+]
+```
+
+<Tip>
+Use `$project` to reduce document size and improve filter performance.
+</Tip>
+
+## Alert schema
+
+Filters operate on alert documents stored in MongoDB. Understanding the schema is essential for writing effective filters.
+
+### ZTF alert schema
+
+```json
+{
+  "_id": 2462315415115010042,  // candid
+  "objectId": "ZTF24aabcdef",
+  "candidate": {
+    "jd": 2459123.5,
+    "ra": 123.456,
+    "dec": 45.678,
+    "magpsf": 18.5,
+    "sigmapsf": 0.1,
+    "fid": 1,  // Filter ID: 1=g, 2=r, 3=i
+    "rb": 0.95,  // RealBogus score
+    "drb": 0.98,  // DeepLearning RealBogus
+    "isdiffpos": "t",  // Positive subtraction
+    "programid": 1  // 1=public, 2=partnership, 3=Caltech
+  },
+  "classifications": [
+    {
+      "classifier": "supernova_cnn",
+      "score": 0.87
+    }
+  ],
+  "xmatch": {
+    "PS1_DR1": [...],
+    "Gaia_DR3": [...],
+    "NED": [...]
+  },
+  "aliases": {
+    "ZTF": ["ZTF24aabcdef"],
+    "LSST": []
+  }
+}
+```
+
+### Accessing auxiliary data
+
+Filters can access previous photometry and forced photometry using special field names:
+
+```json
+[
+  {
+    "$match": {
+      "ZTF.prv_candidates": { "$exists": true }
+    }
+  },
+  {
+    "$addFields": {
+      "n_detections": { "$size": "$ZTF.prv_candidates" }
+    }
+  },
+  {
+    "$match": {
+      "n_detections": { "$gte": 3 }
+    }
+  }
+]
+```
+
+<Note>
+BOOM automatically loads auxiliary data when filters reference `ZTF.prv_candidates` or `ZTF.fp_hists`.
+</Note>
+
+## Example filters
+
+### Bright supernovae
+
+Select nuclear transients brighter than magnitude 19 with crossmatch to nearby galaxies:
+
+```json
+[
+  {
+    "$match": {
+      "candidate.magpsf": { "$lt": 19 },
+      "candidate.rb": { "$gt": 0.65 },
+      "candidate.isdiffpos": "t",
+      "xmatch.NED": { "$ne": [] }
+    }
+  },
+  {
+    "$addFields": {
+      "nearest_galaxy_z": {
+        "$arrayElemAt": ["$xmatch.NED.z", 0]
+      }
+    }
+  },
+  {
+    "$match": {
+      "nearest_galaxy_z": { "$lt": 0.05 }
+    }
+  }
+]
+```
+
+### Rising fast transients
+
+Select alerts that have brightened by more than 1 magnitude in the last observation:
+
+```json
+[
+  {
+    "$match": {
+      "ZTF.prv_candidates": { "$exists": true }
+    }
+  },
+  {
+    "$addFields": {
+      "current_mag": "$candidate.magpsf",
+      "previous_mag": {
+        "$let": {
+          "vars": {
+            "same_filter": {
+              "$filter": {
+                "input": "$ZTF.prv_candidates",
+                "as": "prv",
+                "cond": {
+                  "$and": [
+                    { "$eq": ["$$prv.candidate.fid", "$candidate.fid"] },
+                    { "$ne": ["$$prv.candidate.magpsf", null] }
+                  ]
+                }
+              }
+            }
+          },
+          "in": {
+            "$arrayElemAt": ["$$same_filter.candidate.magpsf", 0]
+          }
+        }
+      }
+    }
+  },
+  {
+    "$match": {
+      "previous_mag": { "$ne": null },
+      "$expr": {
+        "$gt": [
+          { "$subtract": ["$previous_mag", "$current_mag"] },
+          1.0
+        ]
+      }
+    }
+  }
+]
+```
+
+### High classification score
+
+Select alerts with high supernova classification scores:
+
+```json
+[
+  {
+    "$match": {
+      "classifications.classifier": "supernova_cnn"
+    }
+  },
+  {
+    "$addFields": {
+      "sn_score": {
+        "$let": {
+          "vars": {
+            "sn_class": {
+              "$filter": {
+                "input": "$classifications",
+                "as": "c",
+                "cond": { "$eq": ["$$c.classifier", "supernova_cnn"] }
+              }
+            }
+          },
+          "in": { "$arrayElemAt": ["$$sn_class.score", 0] }
+        }
+      }
+    }
+  },
+  {
+    "$match": {
+      "sn_score": { "$gte": 0.8 }
+    }
+  }
+]
+```
+
+## Adding filters via CLI
+
+Use the `add_filter` binary to add filters to the database:
+
+<Steps>
+
+<Step title="Create filter JSON file">
+
+Save your pipeline to a JSON file:
+
+```json bright_transients.json
+[
+  {
+    "$match": {
+      "candidate.magpsf": { "$lt": 18 },
+      "candidate.rb": { "$gt": 0.65 }
+    }
+  }
+]
+```
+
+</Step>
+
+<Step title="Run add_filter command">
+
+```bash
+cargo run --release --bin add_filter \
+  ztf \
+  "Bright transients" \
+  bright_transients.json \
+  --description "Alerts brighter than mag 18 with RB > 0.65"
+```
+
+### Parameters
+
+- First argument: Survey name (`ztf`, `lsst`, or `decam`)
+- Second argument: Filter name
+- Third argument: Path to JSON pipeline file
+- `--description`: Optional description (default: "Added via CLI")
+
+</Step>
+
+<Step title="Verify filter was added">
+
+The command outputs:
+
+```
+Filter with ID 550e8400-e29b-41d4-a716-446655440000 added successfully from bright_transients.json
+```
+
+The filter is now active and will run on new alerts.
+
+</Step>
+
+</Steps>
+
+## Filter permissions
+
+For surveys with data rights (currently only ZTF), filters must specify which program IDs they can access:
+
+```json
+{
+  "permissions": {
+    "ZTF": [1, 2, 3]  // 1=public, 2=partnership, 3=Caltech
+  }
+}
+```
+
+<Warning>
+Filters can only access alerts from programs listed in their permissions. Attempting to access restricted data will result in a `FilterError::InvalidFilterPermissions`.
+</Warning>
+
+### Default permissions
+
+The `add_filter` CLI tool sets default permissions:
+
+```rust src/bin/add_filter.rs
+let permissions = HashMap::from([(Survey::Ztf, vec![1, 2, 3])]);
+```
+
+This grants access to all ZTF program IDs. Modify this in the source code or use the API to set custom permissions.
+
+## Filter validation
+
+BOOM validates filter pipelines before execution:
+
+1. **JSON parsing**: Pipeline must be valid JSON array
+2. **MongoDB syntax**: Each stage must be valid MongoDB aggregation syntax
+3. **Field references**: Referenced fields should exist in alert schema
+4. **Permissions**: Survey-specific permission checks
+
+<Tip>
+Test your filter pipeline in MongoDB Compass or mongosh before adding it to BOOM.
+</Tip>
+
+## Auxiliary data loading
+
+BOOM optimizes filter execution by only loading auxiliary data when needed:
+
+```rust src/filter/ztf.rs
+let use_ztf_prv_candidates_index = uses_field_in_filter(filter_pipeline, "ZTF.prv_candidates");
+let use_ztf_fp_hists_index = uses_field_in_filter(filter_pipeline, "ZTF.fp_hists");
+```
+
+If your filter references:
+- `ZTF.prv_candidates`: Previous detections are loaded via `$lookup`
+- `ZTF.fp_hists`: Forced photometry history is loaded via `$lookup`
+
+This minimizes unnecessary database queries and improves performance.
+
+## Performance tips
+
+<AccordionGroup>
+  <Accordion title="Use $match early">
+    Place `$match` stages as early as possible in your pipeline to reduce the number of documents processed by subsequent stages.
+    
+    ```json
+    // Good: Filter first, then compute
+    [{"$match": {...}}, {"$addFields": {...}}]
+    
+    // Bad: Compute on all documents, then filter
+    [{"$addFields": {...}}, {"$match": {...}}]
+    ```
+  </Accordion>
+  
+  <Accordion title="Limit auxiliary data">
+    Only request auxiliary data you need. Each auxiliary data lookup adds a `$lookup` stage.
+    
+    ```json
+    // Only if you need previous candidates
+    [{"$match": {"ZTF.prv_candidates": {"$exists": true}}}]
+    ```
+  </Accordion>
+  
+  <Accordion title="Use indexes">
+    BOOM creates indexes on common fields. Structure your `$match` stages to use these indexes:
+    - `_id` (candid)
+    - `objectId`
+    - `candidate.jd`
+    - `candidate.ra`, `candidate.dec` (2dsphere index)
+  </Accordion>
+  
+  <Accordion title="Avoid heavy computation">
+    Complex computations in `$addFields` can slow down filters. Prefer simple comparisons when possible.
+  </Accordion>
+</AccordionGroup>
+
+## Filter versioning
+
+Filters support multiple versions (`fv` array). This allows you to:
+
+- Update filter logic while preserving history
+- A/B test different filter versions
+- Roll back to previous versions if needed
+
+Each version has:
+- `fid`: Version identifier
+- `pipeline`: The aggregation pipeline JSON
+- `created_at`: Creation timestamp (Julian Date)
+- `changelog`: Description of changes
+
+The `active_fid` field specifies which version is currently active.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="MongoDB aggregation" icon="database" href="https://www.mongodb.com/docs/manual/aggregation/">
+    Learn MongoDB aggregation pipeline syntax
+  </Card>
+  <Card title="Monitoring" icon="chart-line" href="/guides/monitoring">
+    Track filter performance with Prometheus metrics
+  </Card>
+  <Card title="API reference" icon="code" href="/api/filters">
+    Manage filters programmatically via the API
+  </Card>
+</CardGroup>

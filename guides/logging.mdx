@@ -1,0 +1,465 @@
+---
+title: Logging
+description: Configure BOOM's logging system for debugging and monitoring
+---
+
+BOOM uses the `tracing` crate for structured logging and instrumentation. This guide explains how to configure logging levels and span events.
+
+## Overview
+
+BOOM's logging system provides:
+
+- **Structured logs**: Events with context from active spans
+- **Configurable levels**: Control verbosity via environment variables
+- **Span instrumentation**: Track function execution and performance
+- **Error context**: Automatic error source chain formatting
+
+## Log levels
+
+Configure logging verbosity with the `RUST_LOG` environment variable.
+
+### Available levels
+
+| Level | Usage | Example |
+|-------|-------|----------|
+| `error` | Actual errors | Database connection failed |
+| `warn` | Unexpected situations | Missing optional field |
+| `info` | Major lifecycle events | Worker started, Alert processed |
+| `debug` | Detailed diagnostics | Function entry/exit, Variable values |
+| `trace` | Very detailed diagnostics | Loop iterations, All function calls |
+| `off` | Disable logging | Silence all output |
+
+### Basic usage
+
+<CodeGroup>
+
+```bash Info level (default)
+# Default: info level for boom, error only for ort crate
+cargo run --bin scheduler -- ztf
+```
+
+```bash Debug level
+RUST_LOG=debug cargo run --bin scheduler -- ztf
+```
+
+```bash Trace level
+RUST_LOG=trace cargo run --bin scheduler -- ztf
+```
+
+```bash Error only
+RUST_LOG=error cargo run --bin scheduler -- ztf
+```
+
+</CodeGroup>
+
+### Default directive
+
+When `RUST_LOG` is not set, BOOM uses:
+
+```rust src/utils/o11y/logging.rs
+let env_filter = EnvFilter::try_from_default_env()
+    .or_else(|_| EnvFilter::try_new("info,ort=error"))?;
+```
+
+This means:
+- `info`: Log INFO and above for all crates
+- `ort=error`: Only log ERROR from the `ort` crate (ONNX Runtime)
+
+<Note>
+The `ort` crate is significantly noisier than other dependencies, so it's limited to ERROR by default.
+</Note>
+
+## Advanced filtering
+
+The `RUST_LOG` variable supports complex filtering directives.
+
+### Per-crate levels
+
+Set different levels for different crates:
+
+```bash
+RUST_LOG=boom=debug,mongodb=warn,rdkafka=error cargo run --bin scheduler -- ztf
+```
+
+This sets:
+- `debug` for BOOM code
+- `warn` for MongoDB driver
+- `error` for Kafka client
+
+### Per-module levels
+
+Target specific modules:
+
+```bash
+RUST_LOG=boom::filter=trace,boom::alert=debug cargo run --bin scheduler -- ztf
+```
+
+### Overriding defaults
+
+<Warning>
+Setting `RUST_LOG` completely overwrites the default directive. If you need DEBUG but still want to filter `ort`, specify it explicitly:
+</Warning>
+
+```bash
+# Bad: Shows all ort logs
+RUST_LOG=debug cargo run --bin scheduler -- ztf
+
+# Good: Debug everywhere except ort
+RUST_LOG=debug,ort=error cargo run --bin scheduler -- ztf
+```
+
+## Span events
+
+Spans represent durations (like function execution) and provide context for log events.
+
+### BOOM_SPAN_EVENTS variable
+
+Enable span lifecycle events with `BOOM_SPAN_EVENTS`:
+
+```bash
+BOOM_SPAN_EVENTS=new,close cargo run --bin scheduler -- ztf
+```
+
+### Available span events
+
+| Event | Description | Use case |
+|-------|-------------|----------|
+| `new` | Span created | Track when functions start |
+| `enter` | Span entered | Functions with multiple entry points |
+| `exit` | Span exited | Functions with multiple exit points |
+| `close` | Span closed (includes duration) | Performance profiling |
+| `active` | All events when span is active | Maximum verbosity |
+| `full` | All span events | Complete span lifecycle |
+| `none` | No span events (default) | Normal operation |
+
+### Profiling with span events
+
+The `close` event includes execution time, useful for profiling:
+
+```bash
+BOOM_SPAN_EVENTS=close cargo run --bin scheduler -- ztf
+```
+
+Output includes:
+
+```
+close boom::filter::run_filter time.busy=1.23ms time.idle=45.6μs
+```
+
+<Tip>
+Use `BOOM_SPAN_EVENTS=new,close` to see when functions start and how long they take.
+</Tip>
+
+### Multiple span events
+
+Combine multiple events with commas:
+
+```bash
+BOOM_SPAN_EVENTS=new,enter,exit,close cargo run --bin scheduler -- ztf
+```
+
+## Complete example
+
+Combine `RUST_LOG` and `BOOM_SPAN_EVENTS` for detailed debugging:
+
+```bash
+RUST_LOG=debug,ort=warn BOOM_SPAN_EVENTS=new,close \
+  cargo run --bin scheduler -- ztf
+```
+
+This configuration:
+- Sets DEBUG level for all crates
+- Limits `ort` to WARN
+- Shows span creation and completion with timing
+
+## Function instrumentation
+
+BOOM uses the `#[instrument]` attribute to create spans automatically:
+
+```rust src/bin/scheduler.rs
+#[instrument(skip_all, fields(survey = %args.survey))]
+async fn run(args: Cli, meter_provider: SdkMeterProvider) {
+    // Function body automatically wrapped in a span
+}
+```
+
+### Skipping fields
+
+The `skip` parameter excludes fields from span context:
+
+```rust
+#[instrument(skip(self))]  // Don't log self
+pub async fn process_alert(&self, alert: Alert) {
+    // ...
+}
+```
+
+This avoids logging large or unhelpful values like `self`.
+
+### Custom fields
+
+Add custom fields to spans:
+
+```rust src/filter/base.rs
+#[instrument(skip(alert, schema), fields(candid = alert.candid, object_id = alert.object_id), err)]
+pub async fn send_alert_to_kafka(
+    alert: &Alert,
+    schema: &Schema,
+    producer: &FutureProducer,
+    topic: &str,
+) -> Result<(), FilterWorkerError> {
+    // ...
+}
+```
+
+Logs include:
+
+```
+INFO send_alert_to_kafka{candid=2462315415115010042 object_id="ZTF24aabcdef"}
+```
+
+## Error logging
+
+BOOM provides macros for standardized error logging.
+
+### log_error! macro
+
+Log errors with automatic source chain formatting:
+
+```rust
+use boom::utils::o11y::logging::{log_error, WARN};
+
+// Basic error logging (ERROR level)
+log_error!(error);
+
+// With context message
+log_error!(error, "failed to process alert");
+
+// With format arguments
+log_error!(error, "failed to process alert {}", candid);
+
+// Custom log level
+log_error!(WARN, error, "retrying operation");
+```
+
+### as_error! macro
+
+Create closures for `Result` methods:
+
+```rust
+use boom::utils::o11y::logging::as_error;
+
+// Use with inspect_err
+foo().inspect_err(as_error!("operation failed"))?;
+
+// Use with unwrap_or_else
+foo().unwrap_or_else(as_error!());
+```
+
+### Error source chains
+
+BOOM automatically formats error source chains:
+
+```rust src/utils/o11y/logging.rs
+error = %$error,
+source = %iter_sources(&$error).collect::<Vec<_>>().join(SEP),
+debug = ?$error
+```
+
+Output includes:
+
+```
+ERROR filter execution failed error="invalid pipeline" source="field not found | invalid BSON type" debug=...
+```
+
+## Log output format
+
+BOOM's log format includes:
+
+```rust src/utils/o11y/logging.rs
+let fmt_layer = tracing_subscriber::fmt::layer()
+    .with_target(false)       // Don't show module path
+    .with_file(true)          // Show source file
+    .with_line_number(true)   // Show line number
+    .with_span_events(parse_span_events("BOOM_SPAN_EVENTS"));
+```
+
+Example output:
+
+```
+2024-06-17T12:34:56.789Z INFO boom/src/scheduler.rs:45: heartbeat: workers running alert=3/3 enrichment=3/3 filter=3/3
+```
+
+## Flame graphs
+
+Generate flame graphs for performance profiling:
+
+<Steps>
+
+<Step title="Install inferno">
+
+```bash
+cargo install inferno
+```
+
+</Step>
+
+<Step title="Run with BOOM_FLAME_FILE">
+
+```bash
+BOOM_FLAME_FILE=./tracing.folded cargo run --bin scheduler -- ztf
+```
+
+Let BOOM run for a while, then terminate with `Ctrl+C`.
+
+</Step>
+
+<Step title="Generate SVG">
+
+```bash
+inferno-flamegraph <tracing.folded >tracing-flamegraph.svg
+```
+
+Open the SVG in your browser for an interactive flame graph.
+
+</Step>
+
+</Steps>
+
+<Note>
+Flame graphs use span instrumentation to track function execution time. Functions without `#[instrument]` won't appear in the graph.
+</Note>
+
+## Logging conventions
+
+BOOM follows these logging conventions:
+
+### When to log at each level
+
+<AccordionGroup>
+  <Accordion title="INFO level">
+    Reserve INFO for major lifecycle events:
+    - Worker started/stopped
+    - Database connected
+    - Alert batch processed
+    - Filter executed
+    
+    Avoid logging every individual alert at INFO level.
+  </Accordion>
+  
+  <Accordion title="WARN level">
+    Use WARN for unexpected but non-critical issues:
+    - Missing optional configuration
+    - Retryable errors
+    - Deprecated features
+    - Performance degradation
+  </Accordion>
+  
+  <Accordion title="ERROR level">
+    Log actual errors that require attention:
+    - Database connection failures
+    - Invalid filter pipelines
+    - Unrecoverable processing errors
+    
+    Only log errors where they're handled, not at every propagation point.
+  </Accordion>
+  
+  <Accordion title="DEBUG level">
+    Use DEBUG for information useful during development:
+    - Function entry/exit
+    - Intermediate computation results
+    - Configuration values
+    - Cache hits/misses
+  </Accordion>
+  
+  <Accordion title="TRACE level">
+    Use TRACE for very detailed diagnostics:
+    - Loop iterations
+    - Individual field values
+    - Low-level protocol details
+  </Accordion>
+</AccordionGroup>
+
+### Error handling
+
+From `CONTRIBUTING.md`:
+
+> All other errors are recoverable errors and should be expressed using custom error types (usually enums) that implement `std::error::Error`. These errors should be propagated to the caller using the `?` operator.
+>
+> Each error is propagated until it's *handled*, i.e., when a caller intercepts the error value to either use it for control flow or log it.
+
+**Key principle**: Don't log errors if you're propagating them with `?`. Only log where you handle the error.
+
+```rust
+// Bad: Logs at every propagation
+fn process() -> Result<()> {
+    let result = foo().inspect_err(|e| log_error!(e))?;  // Don't do this
+    bar(result).inspect_err(|e| log_error!(e))?;         // Or this
+    Ok(())
+}
+
+// Good: Log only at handling site
+fn process() -> Result<()> {
+    let result = foo()?;  // Just propagate
+    bar(result)?;         // Just propagate
+    Ok(())
+}
+
+fn main() {
+    if let Err(e) = process() {
+        log_error!(e, "processing failed");  // Log here
+    }
+}
+```
+
+## Troubleshooting
+
+### No logs appearing
+
+Check that you haven't set `RUST_LOG=off`:
+
+```bash
+echo $RUST_LOG
+```
+
+Unset it if needed:
+
+```bash
+unset RUST_LOG
+```
+
+### Too many logs from dependencies
+
+Filter noisy crates:
+
+```bash
+RUST_LOG=info,hyper=warn,tokio=warn cargo run --bin scheduler -- ztf
+```
+
+### Span events not showing
+
+Verify `BOOM_SPAN_EVENTS` is set:
+
+```bash
+echo $BOOM_SPAN_EVENTS
+```
+
+Set it if needed:
+
+```bash
+export BOOM_SPAN_EVENTS=new,close
+```
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Monitoring" icon="chart-line" href="/guides/monitoring">
+    Track pipeline performance with Prometheus metrics
+  </Card>
+  <Card title="Contributing" icon="code-branch" href="https://github.com/boom-astro/boom/blob/main/CONTRIBUTING.md">
+    Learn BOOM's development conventions
+  </Card>
+  <Card title="Tracing docs" icon="book" href="https://docs.rs/tracing/">
+    Learn more about the tracing crate
+  </Card>
+</CardGroup>

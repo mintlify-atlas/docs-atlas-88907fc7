@@ -1,0 +1,424 @@
+---
+title: Filters
+description: Create and manage alert filters using MongoDB aggregation pipelines
+---
+
+Filters allow you to define custom criteria for selecting astronomical alerts from surveys. They use MongoDB aggregation pipelines to process alert data in real-time.
+
+## Create a filter
+
+Create a new filter with a MongoDB aggregation pipeline.
+
+<CodeGroup>
+```bash curl
+curl -X POST http://localhost:4000/filters \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "High significance transients",
+    "description": "Alerts with significance > 5 sigma",
+    "survey": "ZTF",
+    "permissions": {
+      "ZTF": [1, 2, 3]
+    },
+    "pipeline": [
+      {
+        "$match": {
+          "candidate.rb": {"$gte": 0.9},
+          "candidate.drb": {"$gte": 0.9}
+        }
+      }
+    ]
+  }'
+```
+
+```python Python
+import requests
+
+filter_data = {
+    "name": "High significance transients",
+    "description": "Alerts with significance > 5 sigma",
+    "survey": "ZTF",
+    "permissions": {
+        "ZTF": [1, 2, 3]
+    },
+    "pipeline": [
+        {
+            "$match": {
+                "candidate.rb": {"$gte": 0.9},
+                "candidate.drb": {"$gte": 0.9}
+            }
+        }
+    ]
+}
+
+response = requests.post(
+    "http://localhost:4000/filters",
+    headers={"Authorization": f"Bearer {token}"},
+    json=filter_data
+)
+```
+</CodeGroup>
+
+### Request
+
+<ParamField path="name" type="string" required>
+  Descriptive name for the filter
+</ParamField>
+
+<ParamField path="description" type="string">
+  Optional detailed description of what the filter does
+</ParamField>
+
+<ParamField path="survey" type="string" required>
+  Survey to run the filter on: `ZTF`, `LSST`, or `DECam`
+</ParamField>
+
+<ParamField path="permissions" type="object" required>
+  Survey permissions mapping. For ZTF, this maps to program IDs. Required for surveys that need permissions.
+</ParamField>
+
+<ParamField path="pipeline" type="array" required>
+  MongoDB aggregation pipeline stages. Must start with a `$match` stage.
+</ParamField>
+
+### Response
+
+<ResponseField name="id" type="string">
+  Unique identifier for the filter
+</ResponseField>
+
+<ResponseField name="name" type="string">
+  Filter name
+</ResponseField>
+
+<ResponseField name="survey" type="string">
+  Survey the filter runs on
+</ResponseField>
+
+<ResponseField name="active" type="boolean">
+  Whether the filter is currently active
+</ResponseField>
+
+<ResponseField name="active_fid" type="string">
+  ID of the currently active filter version
+</ResponseField>
+
+<ResponseField name="fv" type="array">
+  Array of filter versions, each containing:
+  - `fid` - Version identifier
+  - `pipeline` - Pipeline JSON string
+  - `changelog` - Optional change description
+  - `created_at` - Creation timestamp (Julian Date)
+</ResponseField>
+
+## List filters
+
+Retrieve all filters you have access to. Admins see all filters; regular users see only their own.
+
+<CodeGroup>
+```bash curl
+curl http://localhost:4000/filters \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+```python Python
+response = requests.get(
+    "http://localhost:4000/filters",
+    headers={"Authorization": f"Bearer {token}"}
+)
+filters = response.json()["data"]
+```
+</CodeGroup>
+
+## Get a specific filter
+
+Retrieve details for a single filter by ID.
+
+<CodeGroup>
+```bash curl
+curl http://localhost:4000/filters/FILTER_ID \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+```python Python
+response = requests.get(
+    f"http://localhost:4000/filters/{filter_id}",
+    headers={"Authorization": f"Bearer {token}"}
+)
+filter_data = response.json()["data"]
+```
+</CodeGroup>
+
+## Update filter metadata
+
+Update a filter's name, description, active status, or permissions.
+
+<CodeGroup>
+```bash curl
+curl -X PATCH http://localhost:4000/filters/FILTER_ID \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Updated filter name",
+    "active": true,
+    "active_fid": "version-id-here"
+  }'
+```
+
+```python Python
+update_data = {
+    "name": "Updated filter name",
+    "active": True,
+    "active_fid": "version-id-here"
+}
+
+response = requests.patch(
+    f"http://localhost:4000/filters/{filter_id}",
+    headers={"Authorization": f"Bearer {token}"},
+    json=update_data
+)
+```
+</CodeGroup>
+
+### Request
+
+<ParamField path="name" type="string">
+  New filter name
+</ParamField>
+
+<ParamField path="description" type="string">
+  New description
+</ParamField>
+
+<ParamField path="active" type="boolean">
+  Enable or disable the filter
+</ParamField>
+
+<ParamField path="active_fid" type="string">
+  Set which filter version is active. Must be a valid version ID from `fv` array.
+</ParamField>
+
+<ParamField path="permissions" type="object">
+  Update survey permissions
+</ParamField>
+
+## Add a filter version
+
+Create a new version of an existing filter with an updated pipeline.
+
+<CodeGroup>
+```bash curl
+curl -X POST http://localhost:4000/filters/FILTER_ID/versions \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "pipeline": [
+      {
+        "$match": {
+          "candidate.rb": {"$gte": 0.95}
+        }
+      }
+    ],
+    "changelog": "Increased RB threshold to 0.95",
+    "set_as_active": true
+  }'
+```
+
+```python Python
+version_data = {
+    "pipeline": [
+        {"$match": {"candidate.rb": {"$gte": 0.95}}}
+    ],
+    "changelog": "Increased RB threshold to 0.95",
+    "set_as_active": True
+}
+
+response = requests.post(
+    f"http://localhost:4000/filters/{filter_id}/versions",
+    headers={"Authorization": f"Bearer {token}"},
+    json=version_data
+)
+```
+</CodeGroup>
+
+### Request
+
+<ParamField path="pipeline" type="array" required>
+  New MongoDB aggregation pipeline
+</ParamField>
+
+<ParamField path="changelog" type="string">
+  Description of changes in this version
+</ParamField>
+
+<ParamField path="set_as_active" type="boolean" default="true">
+  Whether to make this version active immediately
+</ParamField>
+
+## Test a filter
+
+Test a filter pipeline against real alert data without creating a filter.
+
+<CodeGroup>
+```bash curl
+curl -X POST http://localhost:4000/filters/test \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "survey": "ZTF",
+    "permissions": {"ZTF": [1, 2, 3]},
+    "pipeline": [
+      {"$match": {"candidate.rb": {"$gte": 0.9}}}
+    ],
+    "start_jd": 2459000.5,
+    "end_jd": 2459001.5,
+    "limit": 10
+  }'
+```
+
+```python Python
+test_data = {
+    "survey": "ZTF",
+    "permissions": {"ZTF": [1, 2, 3]},
+    "pipeline": [
+        {"$match": {"candidate.rb": {"$gte": 0.9}}}
+    ],
+    "start_jd": 2459000.5,
+    "end_jd": 2459001.5,
+    "limit": 10
+}
+
+response = requests.post(
+    "http://localhost:4000/filters/test",
+    headers={"Authorization": f"Bearer {token}"},
+    json=test_data
+)
+results = response.json()["data"]["results"]
+```
+</CodeGroup>
+
+### Request
+
+<ParamField path="survey" type="string" required>
+  Survey to test against
+</ParamField>
+
+<ParamField path="permissions" type="object" required>
+  Survey permissions
+</ParamField>
+
+<ParamField path="pipeline" type="array" required>
+  Pipeline to test
+</ParamField>
+
+<ParamField path="start_jd" type="number">
+  Start Julian Date for test window
+</ParamField>
+
+<ParamField path="end_jd" type="number">
+  End Julian Date for test window (max 7 days from start)
+</ParamField>
+
+<ParamField path="object_ids" type="array">
+  List of object IDs to test (max 1000)
+</ParamField>
+
+<ParamField path="candids" type="array">
+  List of candidate IDs to test (max 100000)
+</ParamField>
+
+<ParamField path="sort_by" type="string">
+  Field to sort results by
+</ParamField>
+
+<ParamField path="sort_order" type="string">
+  Sort order: `Ascending` or `Descending`
+</ParamField>
+
+<ParamField path="limit" type="number">
+  Maximum number of results to return
+</ParamField>
+
+### Response
+
+<ResponseField name="pipeline" type="array">
+  The complete pipeline that was executed, including permissions filters
+</ResponseField>
+
+<ResponseField name="results" type="array">
+  Array of matching alert documents
+</ResponseField>
+
+## Test filter count
+
+Get a count of alerts matching a filter without retrieving the full documents.
+
+<CodeGroup>
+```bash curl
+curl -X POST http://localhost:4000/filters/test/count \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "survey": "ZTF",
+    "permissions": {"ZTF": [1, 2, 3]},
+    "pipeline": [
+      {"$match": {"candidate.rb": {"$gte": 0.9}}}
+    ],
+    "start_jd": 2459000.5,
+    "end_jd": 2459001.5
+  }'
+```
+
+```python Python
+response = requests.post(
+    "http://localhost:4000/filters/test/count",
+    headers={"Authorization": f"Bearer {token}"},
+    json=test_data
+)
+count = response.json()["data"]["count"]
+```
+</CodeGroup>
+
+### Response
+
+<ResponseField name="count" type="number">
+  Number of alerts matching the filter
+</ResponseField>
+
+<ResponseField name="pipeline" type="array">
+  The complete pipeline that was executed
+</ResponseField>
+
+## Get filter schema
+
+Retrieve the Avro schema showing the data structure available for filtering.
+
+<CodeGroup>
+```bash curl
+curl http://localhost:4000/filters/schemas/ZTF
+```
+
+```python Python
+response = requests.get(
+    "http://localhost:4000/filters/schemas/ZTF"
+)
+schema = response.json()["data"]
+```
+</CodeGroup>
+
+Supported surveys: `ZTF`, `LSST`
+
+## Permissions
+
+<Note>
+  Only filter owners and admins can modify filters. All authenticated users can create filters and view their own.
+</Note>
+
+## Filter constraints
+
+- Pipelines must start with a `$match` stage
+- Test time windows cannot exceed 7 days (7.0 JD)
+- Maximum 1000 object IDs per test
+- Maximum 100000 candidate IDs per test
+- Surveys like ZTF require permissions to be defined

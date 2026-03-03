@@ -1,0 +1,295 @@
+---
+title: Users
+description: Manage user accounts in the BOOM system
+---
+
+The Users API allows administrators to create, list, and delete user accounts. All user management operations require admin privileges.
+
+<Warning>
+  All endpoints on this page require admin authentication. Regular users cannot access user management functions.
+</Warning>
+
+## Create a user
+
+Create a new user account. Only admins can create users.
+
+<CodeGroup>
+```bash curl
+curl -X POST http://localhost:4000/users \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "newuser",
+    "email": "newuser@example.com",
+    "password": "secure_password_here"
+  }'
+```
+
+```python Python
+import requests
+
+user_data = {
+    "username": "newuser",
+    "email": "newuser@example.com",
+    "password": "secure_password_here"
+}
+
+response = requests.post(
+    "http://localhost:4000/users",
+    headers={"Authorization": f"Bearer {admin_token}"},
+    json=user_data
+)
+
+new_user = response.json()["data"]
+```
+
+```javascript JavaScript
+const userData = {
+  username: 'newuser',
+  email: 'newuser@example.com',
+  password: 'secure_password_here'
+};
+
+const response = await fetch('http://localhost:4000/users', {
+  method: 'POST',
+  headers: {
+    'Authorization': `Bearer ${adminToken}`,
+    'Content-Type': 'application/json'
+  },
+  body: JSON.stringify(userData)
+});
+
+const result = await response.json();
+```
+</CodeGroup>
+
+### Request
+
+<ParamField path="username" type="string" required>
+  Unique username for the new user. Must not already exist in the system.
+</ParamField>
+
+<ParamField path="email" type="string" required>
+  Email address for the user
+</ParamField>
+
+<ParamField path="password" type="string" required>
+  Password for the user. Will be securely hashed using bcrypt before storage.
+</ParamField>
+
+### Response
+
+<ResponseField name="id" type="string">
+  Unique identifier (UUID) for the user
+</ResponseField>
+
+<ResponseField name="username" type="string">
+  Username of the created user
+</ResponseField>
+
+<ResponseField name="email" type="string">
+  Email address of the user
+</ResponseField>
+
+<ResponseField name="is_admin" type="boolean">
+  Whether the user has admin privileges (always `false` for newly created users)
+</ResponseField>
+
+<Expandable title="Example response">
+```json
+{
+  "message": "success",
+  "data": {
+    "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "username": "newuser",
+    "email": "newuser@example.com",
+    "is_admin": false
+  }
+}
+```
+</Expandable>
+
+### Error responses
+
+**409 Conflict** - Username already exists:
+```json
+user with username 'newuser' already exists
+```
+
+**403 Forbidden** - Non-admin user attempted to create a user:
+```json
+Only admins can create new users
+```
+
+**401 Unauthorized** - No authentication provided:
+```json
+Unauthorized
+```
+
+## List all users
+
+Retrieve a list of all users in the system.
+
+<CodeGroup>
+```bash curl
+curl http://localhost:4000/users \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+```python Python
+response = requests.get(
+    "http://localhost:4000/users",
+    headers={"Authorization": f"Bearer {token}"}
+)
+
+users = response.json()["data"]
+```
+
+```javascript JavaScript
+const response = await fetch('http://localhost:4000/users', {
+  headers: {
+    'Authorization': `Bearer ${token}`
+  }
+});
+
+const data = await response.json();
+const users = data.data;
+```
+</CodeGroup>
+
+### Response
+
+Returns an array of user objects. Passwords are never included in responses.
+
+<Expandable title="Example response">
+```json
+{
+  "message": "success",
+  "data": [
+    {
+      "id": "admin-id-here",
+      "username": "admin",
+      "email": "admin@example.com",
+      "is_admin": true
+    },
+    {
+      "id": "user-id-here",
+      "username": "researcher1",
+      "email": "researcher1@university.edu",
+      "is_admin": false
+    }
+  ]
+}
+```
+</Expandable>
+
+<Note>
+  This endpoint is available to all authenticated users, not just admins. It's useful for discovering usernames when sharing filters.
+</Note>
+
+## Delete a user
+
+Permanently remove a user account. Only admins can delete users.
+
+<CodeGroup>
+```bash curl
+curl -X DELETE http://localhost:4000/users/USER_ID \
+  -H "Authorization: Bearer YOUR_ADMIN_TOKEN"
+```
+
+```python Python
+response = requests.delete(
+    f"http://localhost:4000/users/{user_id}",
+    headers={"Authorization": f"Bearer {admin_token}"}
+)
+```
+
+```javascript JavaScript
+const response = await fetch(`http://localhost:4000/users/${userId}`, {
+  method: 'DELETE',
+  headers: {
+    'Authorization': `Bearer ${adminToken}`
+  }
+});
+```
+</CodeGroup>
+
+### Path parameters
+
+<ParamField path="user_id" type="string" required>
+  The unique identifier (UUID) of the user to delete
+</ParamField>
+
+### Response
+
+**200 OK** - User deleted successfully:
+```json
+{
+  "status": "success",
+  "message": "user ID 'a1b2c3d4-e5f6-7890-abcd-ef1234567890' deleted successfully"
+}
+```
+
+**404 Not Found** - User doesn't exist:
+```json
+user not found
+```
+
+**403 Forbidden** - Non-admin attempted deletion:
+```json
+Only admins can delete users
+```
+
+<Warning>
+  User deletion is permanent and cannot be undone. Ensure you have the correct user ID before deleting.
+</Warning>
+
+## User security
+
+### Password storage
+
+Passwords are securely hashed using bcrypt with the default cost factor (10 rounds) before being stored in the database. Passwords are never returned in API responses.
+
+### Admin privileges
+
+New users are always created with `is_admin: false`. Admin status cannot be set through the API and must be configured directly in the database or through the configuration file for the default admin account.
+
+### Default admin account
+
+BOOM creates a default admin account on startup with credentials configured in `config.yaml`:
+
+```yaml
+api:
+  auth:
+    admin_username: admin  # Set via BOOM_API__AUTH__ADMIN_USERNAME
+    admin_password: ""     # Set via BOOM_API__AUTH__ADMIN_PASSWORD (required)
+    admin_email: admin@example.com
+```
+
+<Warning>
+  Always set a strong password for the admin account via the `BOOM_API__AUTH__ADMIN_PASSWORD` environment variable. Never use the default value in production.
+</Warning>
+
+## User permissions
+
+Users have the following permissions:
+
+| Action | Regular User | Admin |
+|--------|--------------|-------|
+| Create filters | ✓ | ✓ |
+| View own filters | ✓ | ✓ |
+| View all filters | ✗ | ✓ |
+| Modify own filters | ✓ | ✓ |
+| Modify any filter | ✗ | ✓ |
+| List users | ✓ | ✓ |
+| Create users | ✗ | ✓ |
+| Delete users | ✗ | ✓ |
+| Run queries | ✓ | ✓ |
+
+## Best practices
+
+1. **Limit admin accounts** - Only create admin accounts for users who need full system access
+2. **Strong passwords** - Enforce strong password policies for all users
+3. **Regular audits** - Periodically review the user list and remove inactive accounts
+4. **Unique usernames** - Use descriptive, unique usernames for easier identification
+5. **Email verification** - Consider implementing email verification in your workflow (not built into the API)
